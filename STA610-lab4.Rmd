@@ -1,0 +1,22 @@
+---
+title: "STA610-lab4"
+author: "Ben, Yuan, Guanqi, Machao"
+date: "2/15/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+load('hc2014.RData')
+```
+
+# Introduction
+
+# EDA
+
+# Model
+
+# Conclusion
