@@ -9,14 +9,72 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
+```{r library}
+library(tidyverse)
+```
+
+```{r, include = F}
 load('hc2014.RData')
 ```
+
+```{r, include = F}
+summary(hc2014)
+hc2014_m <- hc2014
+```
+
+```{r}
+hist(hc2014$netincome/1000000, breaks = 50) # two peaks and right-skewed
+abline(v = quantile(na.omit(hc2014$netincome/1000000), 0.05), col = "red")
+abline(v = quantile(na.omit(hc2014$netincome/1000000), 0.95), col = "blue")
+```
+
+```{r}
+hist(log(hc2014$netincome/1000000)) #can only interpret hospitals with positive netincome
+```
+
+```{r}
+hist(log((hc2014$netincome + 1.6*10^(9))/1000000))
+```
+
+```{r}
+#33% of the data are negative
+sum(is.na(log(hc2014$netincome)))/nrow(hc2014)
+#quantiles
+summary(hc2014$netincome)
+
+quantile(na.omit(hc2014$netincome), 0.05)
+quantile(na.omit(hc2014$netincome), 0.95)
+```
+```{r}
+modified <- hc2014 %>% 
+  filter(netincome > quantile(na.omit(hc2014$netincome), 0.05) |
+                   netincome < quantile(na.omit(hc2014$netincome), 0.95) ) 
+nrow(modified)/nrow(hc2014)
+```
+
+```{r}
+summary(modified)
+```
+```{r}
+hist(log(modified$netincome+2*10^(9)))
+```
+
+
+
+
+
 
 # Introduction
 
 # EDA
+# a) marginal distribution of net income
+# b) box plots
+```{r box_plots}
+
+```
 
 # Model
 
 # Conclusion
+
+
