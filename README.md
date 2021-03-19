@@ -1,2 +1,2 @@
-# STA610-lab
-Repository for STA610 labs.
+# STA610-Case 1
+Repository for STA610 case study.
