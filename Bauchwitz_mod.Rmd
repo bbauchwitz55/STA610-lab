@@ -1,0 +1,265 @@
+---
+title: "Ben Bauchwitz Case Study 1"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(tidyverse)
+library(tidyr)
+library(sjmisc)
+library(lme4)
+library(brms)
+library(lattice)
+library(rstan)
+
+knitr::opts_chunk$set(echo = F, include = F)
+load("streetrx.RData")
+cities <- read.csv("simplemaps_uscities_basicv1.73/uscities.csv")
+airports <- read.csv("airports.csv")
+city.mapping <- read.csv("city_mapping.csv")
+```
+
+## Data Cleaning
+
+First, we inspect the dataset to identify how the values are structured. We want to identify noisy or corrupted data and create a plan for correcting them. 
+
+### Drug type
+
+```{r , warning=FALSE, error=FALSE}
+## Step 1: filter out data on other drugs so we only have the drug we are studying
+streetrx.m <- streetrx %>% filter(api_temp == "morphine")
+```
+
+First, we need to filter the dataset to identify the drug of relevance. The `api_temp` field codes which drug each entry is associated with. We are interested in morphine, but we see that there is both a "morphine" category and a "morphine/oxycodone" category. We cannot unambiguously determine whether data in this second category applies to morphine or oxycodone, and while the drugs are used for similar purposes, there are credible differences in the way they are manufactured and their mechanism of action. Therefore, we will filter out all data except those listed exclusively as being for morphine. The result is a dataset with 9268 records.
+
+### Date data
+
+```{r , warning=FALSE, echo=FALSE}
+## Step 2: parse the date and filter out years before 2010
+date_parts <- str_split(streetrx.m$price_date, '/', 3)
+date_parts_df <- as.data.frame(do.call(rbind, date_parts))
+streetrx.m$Date_Month <- date_parts_df$V1
+streetrx.m$Date_Day <- date_parts_df$V2
+streetrx.m$Date_Year <- date_parts_df$V3
+streetrx.m$Days_since_010110 <- as.Date(as.character(streetrx.m$price_date), format="%m/%d/%Y")-as.Date(as.character("1/1/10"), format="%m/%d/%Y")
+streetrx.m <- streetrx.m %>% filter(Date_Year < 22)
+streetrx.m <- streetrx.m %>% filter(Date_Year >= 10)
+```
+
+Second, we will assess the date data. We see there are two fields representing date information: `yq_pdate` and `price_date`. The first field codes the year and quarter as a pseudo-continuous range. However, it is not suitable for assessing the data on a true continuous scale because it portrays each quarter as being closer to adjacent quarters in the same year than adjacent quarters in neighboring years (i.e., fourth quarter 2019 is closer to third quarter 2019 than it is to first quarter 2020 in this coding scheme). However, we may be able to use the `price_date` range to construct a true continuous scale for measuring the date of purchase. Using R's string parsing methods we can parse the date into its individual month, date, and year, and then creating a new field for each record that counts the number of elapsed days since an arbitrary reference date. In this case, we can use January 1, 2010, since the streetrx data collection began in 2010. 
+
+Upon inspecting the date data we observe that 3 entries are from the 1960s and an additional 11 entries are from the 2000s, years before the data collection was active. In this case, there is legitimate concern that the entered data may not be accurate if it was supplied long after the drug purchase event. Since a relatively small number of data are affected, we will filter out the 14 entries with dates prior to 2010, leaving us with 9254 observations.
+
+### Cleaning city names
+
+```{r , warning=FALSE, error=FALSE}
+## Step 3: fix noisy city data, including typos, nicknames, and alternate identifications by cross-referencing official city names and common alternate spellings
+## fill in the missing values
+streetrx.m$city <- as.character(streetrx.m$city)
+streetrx.m[streetrx.m$city == "",]$city <- "Other/Unknown"
+## convert names to upper case to enable matching across cases used
+streetrx.m$city <- sapply(streetrx.m$city, toupper)
+cities$city <- sapply(cities$city, toupper)
+city.mapping$Old_name <- sapply(city.mapping$Old_name, toupper)
+city.mapping$New_name <- sapply(city.mapping$New_name, toupper)
+## find case-corrected city names that match the official database
+city.intsct <- intersect(streetrx.m$city, cities$city)
+city.intsct.df <- as.data.frame(do.call(rbind, as.list(city.intsct)))
+city.intsct.df$Updated_city_name <- city.intsct.df$V1
+streetrx.m <- merge(x = streetrx.m, y = city.intsct.df, by.x = "city", by.y = "V1", all.x = TRUE)
+## For cities that are not in the official city database, check if they are in the dictionary of misprints
+colnames(city.mapping)[2] = "Updated_city_name"
+streetrx.m <- merge(x = streetrx.m, y = city.mapping, by.x = "city", by.y = "Old_name", all.x = TRUE)
+streetrx.m <- streetrx.m %>% mutate(Updated_city_name.x = coalesce(Updated_city_name.x, Updated_city_name.y))
+## If the name still wasn't found, fill in with "Other/Unknown"
+streetrx.m$Updated_city_name.x <- as.character(streetrx.m$Updated_city_name.x)
+streetrx.m[is.na(streetrx.m$Updated_city_name.x),]$Updated_city_name.x <- "Other/Unknown"
+streetrx.m$City_final = paste(streetrx.m$Updated_city_name.x, "-", streetrx.m$state)
+streetrx.m$City_final <- as.factor(streetrx.m$City_final)
+```
+
+Third, we will assess data on the city in which the drugs were purchased. We see that there are 1690 unique "city" values among the 9254 observations. However, when we inspect visually we can see almost immediately that there are numerous entries with different listed names that clearly refer to the same city. This is because users may have used different conventions when supplying city names. For example, users may have listed either "Fort Lauderdale" or "Ft Lauderdale" to refer to the same city, resulting in two different values. We see a range of other common data discrepancies, such as using city nicknames (e.g., "Philly" for Philadelphia), airport codes (e.g., "ATL" for Atlanta), or using the abbreviation used by major sports franchises within the city (e.g., "JAX" for Jacksonville). Various other issues are observed frequently, such as users providing redundant state information (e.g., "Des Moines, IA" instead of just Des Moines), rerring to a city by the specific neighborhood or borrough (e.g., "Brooklyn" instead of "New York") or including single character typos (e.g., "Holywood" instead "Hollywood"). 
+
+In most cases, the original city can be unambiguously identified and corrected manually. First, we will import US census data which defines the official city abbreviation used by each city and cross reference it with the listed data. Luckily, this covers the majority of the entries, but there are still about 300 city values supplied that are not on the list. To address this, we will manually create a new dictionary mapping the noisy value to the corrected value, in the cases identified above where the data can be definitively determined. Then, we apply this mapping to the original data to correct those entries which were non-compliant. During this process we also identified legitimate names of unincorporated areas and townships which were excluded from the original census data, so that we would not be unnecessarily throwing out data from real cities. 
+
+In some cases, the original city cannot be unambiguously identified from the data given. For example, some users listed their zip code, which often crosses city lines. Others listed their county, which include multiple cities, and others listed the general metropolitan area (e.g., "Lehigh Valley" or "Dallas - Fort Worth"). We don't want to guess, so in these cases, we will replace any remaining city names with "Other/Unknown".
+
+One pitfall that we need to avoid is inappropriately aggregating city data that are not related. For example, the dataset contains both "Hollywood, FL" and "Hollywood, CA". If we ultimately build a hierarchical model with both state and city grouping variables, we do not want to mistakenly label data from those two places as being from different states but the same city. Therefore, we need to augment our coding of the city name by appending the state as well so that each city is uniquely encoded, even if it shares its name with another city in a different state. 
+
+### Aggregating source data
+
+```{r , include=FALSE, warning=FALSE, echo=FALSE, error=FALSE}
+## Step 4: convert the source data to a factor with 7 levels:
+## (1) word of mouth   (2) online search   (3) online forum   (4) personal
+## (5) online black market    (6) other online market   (7) other/unknown
+streetrx.m$source <- as.character(streetrx.m$source)
+streetrx.m$Source_class <- "Other/Unknown"
+streetrx.m[grep("silkroad", streetrx.m$source, ignore.case = TRUE),]$Source_class = "Online black market"
+streetrx.m[grep("bluelight", streetrx.m$source, ignore.case = TRUE),]$Source_class = "Online forum"
+streetrx.m[grep("reddit", streetrx.m$source, ignore.case = TRUE),]$Source_class = "Online forum"
+streetrx.m[grep("opiophile", streetrx.m$source, ignore.case = TRUE),]$Source_class = "Online forum"
+streetrx.m[grep("forum", streetrx.m$source, ignore.case = TRUE),]$Source_class = "Oneline forum"
+streetrx.m[grep("Pharmacy", streetrx.m$source, ignore.case = TRUE),]$Source_class = "Other online market"
+streetrx.m[streetrx.m$source == "Heard it",]$Source_class = "Word of mouth"
+streetrx.m[streetrx.m$source == "Personal",]$Source_class = "Personal"
+streetrx.m[streetrx.m$source == "Internet",]$Source_class = "Online search"
+streetrx.m[grep("google", streetrx.m$source, ignore.case = TRUE),]$Source_class = "Online search"
+streetrx.m[grep("yahoo", streetrx.m$source, ignore.case = TRUE),]$Source_class = "Online search"
+streetrx.m$Source_class <- as.factor(streetrx.m$Source_class)
+```
+
+Our next step is to inspect the source data. Most entries are labeled with "Personal" or "Heard it" as the source, but there are still over 50 unique entries, too many to do serious grouping on. However, when we inspect each unique entry, we see some common themes. First, many users entered the specific url for various webpages they searched, and several webpages are represented repeatedly with different URLs. But more imporantly, there are clear patterns in the types of sources listed. In particular, we observe that each of the sources is one of the following: (A) personal, (B) word of mouth, (C) a web forum, (D) an online black market, (E) a legal online market, (F) a web search, or (G) other/unknown. In fact, we can very easily convert the raw data to these categories by using substring search to find particular keywords, such as "silkroad", "bluelight", "reddit", "opiophile", "forum", "pharmacy" and various search engine names. As a result, we can bundle each source into one of those seven categories, making for much simpler and more informative grouping. 
+
+### Cleaning other fields
+
+```{r , include=FALSE, warning=FALSE, echo=FALSE, error=FALSE}
+## Step 5: eliminate noisy state data by converting the states "USA" and "" to "Other/Unknown"
+streetrx.m$state <- as.character(streetrx.m$state)
+streetrx.m[streetrx.m$state == "",]$state <- "Other/Unknown"
+streetrx.m[streetrx.m$state == "USA",]$state <- "Other/Unknown"
+streetrx.m$state <- as.factor(streetrx.m$state)
+
+## Step 6: convert the bulk purchase data to a numeric boolean (0 = false, 1 = true)
+bulk_parts <- str_split(streetrx.m$bulk_purchase, ' ', 2)
+bulk_parts_df <- as.data.frame(do.call(rbind, bulk_parts))
+streetrx.m$Bulk <- as.numeric(bulk_parts_df$V1)
+
+## Step 7: clean up the 'primary reason' variable by marking missing data as "Other/Unknown"
+streetrx.m$Primary_Reason <- as.character(streetrx.m$Primary_Reason)
+streetrx.m[streetrx.m$Primary_Reason == "",]$Primary_Reason <- "13 Not reported"
+streetrx.m$Primary_Reason <- as.factor(streetrx.m$Primary_Reason)
+
+## Step 8: filter out the temporary columns to keep only the processed data
+streetrx.m <- subset(streetrx.m, select=-c(city, yq_pdate, price_date, country, source, api_temp, bulk_purchase, Updated_city_name.x, Updated_city_name.y))
+streetrx.m.comp <- streetrx.m[complete.cases(streetrx.m),]
+```
+
+Our final task is to do some basic cleaning to some of the other fields. First, we see that the state field includes both the states "USA" and "". We will just convert these to "Other/Unknown" since they don't provide any meaningful information. Second, we see that `bulk_purchase` is coded as a string, which isn't helpful, so we will convert it to a numeric boolean (0 = False, 1 = True). Third, we see that there is nothing listed under the `Primay_Reason` field when the user did not enter the reason for the purchase. We will just mark that as "Other/Unknown" as we have with the other fields.
+
+## Exploratory Data Analysis
+In this part, we will explore the distributions of numeric data, potential relationships we might include in the model, and potential correlations.
+
+### Examining distributions of the numeric data
+
+```{r}
+summary(streetrx.m.comp)
+```
+```{r}
+streetrx.m.comp[which(streetrx.m.comp$ppm == 0),] #price cannot be 0; online market
+streetrx.m.comp.pppm <- streetrx.m.comp %>% filter(ppm != 0)
+```
+
+```{r}
+# response transform
+ggplot(data = streetrx.m.comp.pppm) + 
+  geom_density(aes(x = log(ppm))) +
+  theme_bw(base_size = 16)
+```
+
+```{r ,warning=FALSE, error=FALSE}
+##test_norm(streetrx.m.comp$ppm)
+##test_norm(log(streetrx.m.comp$ppm + 0.01))
+levels(as.factor(streetrx.m.comp$mgstr))
+```
+
+```{r}
+plot(log(streetrx.m.comp.pppm$ppm)~streetrx.m.comp.pppm$mgstr) # does not seem to have relationship; slightly negative
+```
+
+```{r}
+plot(log(streetrx.m.comp.pppm$ppm + 0.01)~streetrx.m.comp.pppm$Days_since_010110) #does not seem to have relationship
+```
+
+Our data processing from above results in three numeric variables and several categorical variables. First, we examine the `ppm` variable, our primary outcome variable. Even though the values don't vary over many orders of magnitude, it has extreme right skew. Taking the log of these values appears to dramatically improve various indicators of normality, includng the Q-Q plot and histogram, and while the data still fails a Shapiro-Wilk normality assessment this transform appears reasonable for the data. 
+
+A second issue we observe is in the reported purchase quantities (the variable `mgstr`). Although this variable is numeric, values are reported at discrete intervals, perhaps due to standard packaging sizes or users rounding off the values that they reported. All told, there are 16 unique values ranging from 1 to 200. We have two options: treat this as a categorical variable or accept the sparse numeric coding. If we do ultimately evaluate `mgstr` in our model, it does not seem that we would be interested in categorical relationships. In other words, we don't have any reason to believe there is something unique about individual package size levels. Instead, we are concerned with the general trend in how different volumes affect price. Since 16 points is more than adequate to fit a line in most applications and since the data we've collected has multiple volume sizes at each order of magnitude, it seems reasonable to continue with the numeric encoding.
+
+The final numeric variable we consider is the linear temporal variable we created, which is number of days since Jan 1, 2010. This lets us encode time in a semi-continuous manner. Despite the discreet encoding, the data actually functions quite well as a numeric predictor since there is high resolution relative to the overall time scale. The only thing that is apparent is that when we plot the price data against over time, the data is clearly sparser earlier in streetrx's history. However, with the appropriate parameter selection, this should not be a significant issue in the overall models we will create.
+
+
+### Examining Relationships
+
+```{r}
+ggplot(data = streetrx.m.comp.pppm,
+       aes(x = Primary_Reason, y = log(ppm), color = Primary_Reason)) +
+  geom_violin() +
+  geom_jitter(position = position_dodge(0.5), alpha = 0.3) +
+  theme(axis.text.x = element_text(angle = 60, vjust = 1, hjust=1))+
+  theme(legend.position = "none")+
+  xlab("Purchase Rationale") +
+  ylab("log(ppm)") +
+  ggtitle(label="Relationship between Purchase Rationale and log(ppm)")
+```
+
+```{r}
+ggplot(data = streetrx.m.comp.pppm,
+       aes(x = Source_class, y = log(ppm), color = Source_class)) +
+  geom_violin() +
+  geom_jitter(position = position_dodge(0.5), alpha = 0.3) +
+  theme(axis.text.x = element_text(angle = 60, vjust = 1, hjust=1))+
+  theme(legend.position = "none")+
+  xlab("Information Source") +
+  ylab("log(ppm)") +
+  ggtitle(label="Relationship between Information Source and log(ppm)")
+```
+
+```{r}
+boxplot(log(streetrx.m.comp.pppm$ppm)~streetrx.m.comp.pppm$Bulk)
+table(streetrx.m.comp.pppm$mgstr,streetrx.m.comp.pppm$Bulk)
+```
+
+## Model design
+
+Our processed dataset includes 12 possible variables we can use to predict drug purchase price: location data including region, state, and city; temporal data including month, date, year, and days elapsed since a reference point; purchase format data including the quantity, form, and whether the purchase was in bulk; and other information including the purchase rationale and the source of the data. 
+
+One thing we note is that several of these variables are redundant. For example, if geographic variation captures significant variability in the purchase price, then using state as a predictor alone may be more valuable than combining state with region, which is somewhat arbitrarily segmented. Similarly, the date and year in which drugs were purchased will have limited additional value beyond the linear time encoding we already have. Finally, the subjective bulk purchase indicator variable is not informative given the objective purchase quantity data we already have, so we most likely would not want to include this term in the model.
+
+I propose a model that accounts for the following predictors:
+- Location: a hierarchy of random effects for the state and city in which the drugs were purchased
+- Time: encoded as a linear covariate, plus month as a categorical indicator of seasonal trends (since drug supply may vary in different months due to aggricultural considerations)
+- Purchase size as a linear covariate
+- Purchase rationale as a categorical predictor
+- Information source as a categorical predictor
+
+We will also want to consider interaction effects. Different states and cities may have different baseline prices, but they also may have different market trends. For example, the effect of increased purchase size on price may vary across locations depending on how risky it is to carry larger quantities of drugs in different jurisdictions. Similarly, temporal price trends may vary depending on new local regulations that are enacted in some places but not others. Therefore, the model should include not just random intercepts for state and city, but also random slopes for both purchase date and purchase size. 
+
+
+```{r }
+model1 <-brm(log(ppm) ~ (1|City_final) + (1|state)  + mgstr + Primary_Reason + Source_class + Days_since_010110, 
+             data = streetrx.m.comp.pppm,
+             iter = 7000,
+             warmup = 2000,
+             family = gaussian())
+```
+
+```{r}
+summary(model1)
+```
+
+```{r}
+model2 <- brm(log(ppm) ~ (1|City_final)*Source_class + (1|state) + mgstr + Primary_Reason + Days_since_010110, 
+                warmup = 2000,
+                data = streetrx.m.comp.pppm, 
+                family = gaussian(), 
+                iter = 7000)
+```
+
+```{r}
+summary(model2)
+```
+
+
+```{r}
+#seasonal effects
+model3 <- blmer(log(ppm) ~ (1|City_final) + (1|state) + mgstr + Primary_Reason + Source_class + Date_Month + Days_since_010110, 
+                data = streetrx.m.comp.pppm, 
+                warmup = 2000,
+                family = gaussian(), 
+                iter = 7000)
+summary(model3)
+```
+
+## Results
+
+## Potential Limitations

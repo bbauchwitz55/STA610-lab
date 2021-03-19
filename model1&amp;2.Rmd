@@ -1,0 +1,83 @@
+---
+title: "Model 1&2"
+output: pdf_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(dplyr)
+library(tidyverse)
+library(tidyr)
+library(brms)
+library(lattice)
+library(rstan)
+```
+
+```{r}
+load("models_only.RData")
+```
+
+## Model design
+
+Our processed dataset includes 12 possible variables we can use to predict drug purchase price: location data including region, state, and city; temporal data including month, date, year, and days elapsed since a reference point; purchase format data including the quantity, form, and whether the purchase was in bulk; and other information including the purchase rationale and the source of the data. 
+
+One thing we note is that several of these variables are redundant. For example, if geographic variation captures significant variability in the purchase price, then using state as a predictor alone may be more valuable than combining state with region, which is somewhat arbitrarily segmented. Similarly, the date and year in which drugs were purchased will have limited additional value beyond the linear time encoding we already have. Finally, the subjective bulk purchase indicator variable is not informative given the objective purchase quantity data we already have, so we most likely would not want to include this term in the model.
+
+(model 1)
+I propose a model that accounts for the following predictors:
+- Location: a hierarchy of random effects for the state and city in which the drugs were purchased
+- Time: encoded as a linear covariate, plus month as a categorical indicator of seasonal trends (since drug supply may vary in different months due to aggricultural considerations)
+- Purchase size as a linear covariate
+- Purchase rationale as a categorical predictor
+- Information source as a categorical predictor
+
+We will also want to consider interaction effects. Different states and cities may have different baseline prices, but they also may have different market trends. For example, the effect of increased purchase size on price may vary across locations depending on how risky it is to carry larger quantities of drugs in different jurisdictions. Similarly, temporal price trends may vary depending on new local regulations that are enacted in some places but not others. Therefore, the model should include not just random intercepts for state and city, but also random slopes for both purchase date and purchase size. 
+
+(model 2 with interaction between City_final and Source_class)
+(model 3 with Date_Month for seasonal trend)
+
+
+```{r }
+model1 <-brm(log(ppm) ~ (1|City_final) + (1|state)  + mgstr + Primary_Reason + Source_class + Days_since_010110, 
+             data = streetrx.m.comp.pppm,
+             iter = 7000,
+             warmup = 2000,
+             family = gaussian())
+```
+
+```{r}
+summary(model1)
+```
+
+```{r}
+model2 <- brm(log(ppm) ~ (1|City_final)*Source_class + (1|state) + mgstr + Primary_Reason + Days_since_010110, 
+                warmup = 2000,
+                data = streetrx.m.comp.pppm, 
+                family = gaussian(), 
+                iter = 7000)
+```
+
+```{r}
+summary(model1)
+```
+
+```{r}
+#seasonal effects
+model3 <-  brm(log(ppm) ~ (1|City_final) + (1|state) + mgstr + Primary_Reason + Source_class + Date_Month + Days_since_010110, 
+                data = streetrx.m.comp.pppm, 
+                warmup = 2000,
+                family = gaussian(), 
+                iter = 7000)
+summary(model3)
+```
+
+
+
+
+
+
+
+
+

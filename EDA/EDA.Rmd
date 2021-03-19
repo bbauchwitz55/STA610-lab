@@ -1,0 +1,102 @@
+---
+title: "EDA"
+author: "Guanqi Zeng"
+date: "3/15/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+```
+
+```{r}
+load("model_1&2.RData")
+```
+
+```{r}
+streetrx.m.comp %>% 
+  filter(ppm == 0)
+```
+
+```{r}
+ggplot(streetrx.m.comp.pppm) +
+  geom_density(aes(x = log(ppm))) + 
+  theme_bw(base_size = 12) +
+  ggtitle("Log Transformation for Response")
+```
+```{r, warning = F, message = F}
+ggplot(streetrx.m.comp.pppm) +
+  geom_point(aes(y = log(ppm), x = Days_since_010110)) + 
+  theme_bw(base_size = 12) +
+  ggtitle("Relationship between Days Elapsed and log(ppm)") +
+  xlab("Days Since 01/01/2010")
+```
+
+```{r}
+ggplot(streetrx.m.comp.pppm) +
+  geom_point(aes(y = log(ppm), x = mgstr)) + 
+  theme_bw(base_size = 12) +
+  ggtitle("Relationship between mgstr and log(ppm)")
+```
+
+
+```{r}
+ggplot(data = streetrx.m.comp.pppm,
+       aes(x = Primary_Reason, y = log(ppm), color = Primary_Reason)) +
+  geom_boxplot() +
+  geom_jitter(position = position_dodge(0.5), alpha = 0.3) +
+  theme(axis.text.x = element_text(angle = 80, vjust = 1, hjust=1))+
+  theme(legend.position = "none")
+```
+
+
+```{r}
+xlab("Purchase Rationale") +
+  ylab("log(ppm)") +
+  ggtitle(label="Relationship between Purchase Rationale and log(ppm)")
+```
+
+
+```{r}
+ggplot(data = streetrx.m.comp.pppm,
+       aes(x = Source_class, y = log(ppm), color = Source_class)) +
+  geom_boxplot() +
+  geom_jitter(position = position_dodge(0.5), alpha = 0.3) +
+  theme(axis.text.x = element_text(angle = 60, vjust = 1, hjust=1))+
+  theme(legend.position = "none")+
+  xlab("Information Source") +
+  ylab("log(ppm)") +
+  ggtitle(label="Relationship between Information Source and log(ppm)")
+```
+
+
+```{r}
+streetrx.m.comp.pppm %>% 
+  filter(City_final %in% c("ATLANTA - Georgia", "MESA - Arizona","CHARLOTTE - North Carolina")) %>%
+ggplot(aes(x = Source_class, y = log(ppm), color = City_final)) +
+  geom_boxplot() + 
+  geom_jitter(position = position_dodge(0.5), alpha = 0.3) +
+  theme(axis.text.x = element_text(angle = 0))+
+  xlab("Information Source") +
+  ylab("log(ppm)") +
+  ggtitle(label="Relationship between Information Source and log(ppm)") +
+  theme_bw(base_size = 12)
+```
+
+```{r}
+streetrx.m.comp.pppm$Date_Month <- factor(streetrx.m.comp.pppm$Date_Month,
+                                     levels = c("1","2","3","4","5","6","7","8","9","10","11","12"))
+ggplot(data = streetrx.m.comp.pppm,aes(x = Date_Month, y = log(ppm), color = Date_Month)) +
+  geom_boxplot() + 
+  geom_jitter(position = position_dodge(0.5), alpha = 0.3) +
+  xlab("Month") +
+  ylab("log(ppm)") +
+  ggtitle(label="Relationship between Month and log(ppm)") +
+  theme_bw(base_size = 12)
+```
+
