@@ -390,6 +390,7 @@ m2 <- lm(log(ppm) ~ as.factor(City_final) + as.factor(state), data)
 anova(m1, m2)
 ```
 
+
 ```{r }
 model1 <-brm(log(ppm) ~ (1|City_final) + (1|state)  + mgstr + Primary_Reason + Source_class + Days_since_010110, 
              data = streetrx.m.comp.pppm,
