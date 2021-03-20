@@ -12,6 +12,7 @@ library(lme4)
 library(brms)
 library(lattice)
 library(rstan)
+library(sjstats)
 
 knitr::opts_chunk$set(echo = F, include = F)
 load("data/streetrx.RData")
@@ -243,7 +244,7 @@ plot(log(data$ppm)~data$Days_since_010110) #does not seem to have relationship
 Second, consider the effects of days in each group, here, presumably, `state`. 
 
 ```{r}
-set.seed(101)
+set.seed(108)
 sample_state <- sample(unique(data$state), 6, replace=FALSE)
 ggplot(data[is.element(data$state, sample_state), ], aes(x=Days_since_010110, y=log(ppm), color=state)) +
   geom_point() + 
@@ -671,15 +672,43 @@ They seems to be of equivallent bic score.
 # add days with random slope 
 add_random_days_model <- lmer(log(ppm) ~ (Days_since_010110|state) + Days_since_010110 +  Source_class + mgstr, REML=FALSE, data)
 
-anova(add_random_days_model, base)
+anova(add_random_days_model, add_days_model)
 ```
 No significant different between this model and the original one. So `Days_since_010110` is not added to the model.  
 
 
 Finally, one model comes out of the comparisons among, `mgstr`, `Bulk`, `Primary_Reason`, `Source_class`, and `Days`, is the following. 
 ```{r}
-model <- lmer(log(ppm) ~ (1|state) +Source_class + mgstr, REML=FALSE, data)
+model <- lmer(log(ppm) ~ (1|state) + Days_since_010110 + Bulk + mgstr, REML=FALSE, data)
+model2 <- lmer(log(ppm) ~ (1|state) + Bulk +  mgstr, REML=FALSE, data) 
+model3 <- lmer(log(ppm) ~ (Days_since_010110|state) + Days_since_010110 + Bulk + mgstr, REML=FALSE, data)
+anova(model3, model2)
 ```
+```{r}
+model3 <- lmer(log(ppm) ~ (Days_since_010110|state) + Days_since_010110 + Bulk + mgstr, REML=FALSE, data)
+model4 <- lmer(log(ppm) ~ (Days_since_010110|state) + Days_since_010110 + Bulk + mgstr, REML=FALSE, data)
+```
+```{r}
+icc(model)
+```
+
+```{r}
+icc(model2)
+```
+
+
+
+
+```{r}
+summary(model3)
+```
+```{r}
+summary(model)
+```
+
+
+
+
 
 We also have to investigate whether we have to include the random slopes of `mgstr` to the model. 
 
