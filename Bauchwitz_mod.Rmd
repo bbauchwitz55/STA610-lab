@@ -14,10 +14,10 @@ library(lattice)
 library(rstan)
 
 knitr::opts_chunk$set(echo = F, include = F)
-load("streetrx.RData")
-cities <- read.csv("simplemaps_uscities_basicv1.73/uscities.csv")
-airports <- read.csv("airports.csv")
-city.mapping <- read.csv("city_mapping.csv")
+load("data/streetrx.RData")
+cities <- read.csv("data/simplemaps_uscities_basicv1.73/uscities.csv")
+airports <- read.csv("data/airports.csv")
+city.mapping <- read.csv("data/city_mapping.csv")
 ```
 
 ## Data Cleaning
@@ -58,20 +58,24 @@ Upon inspecting the date data we observe that 3 entries are from the 1960s and a
 ## fill in the missing values
 streetrx.m$city <- as.character(streetrx.m$city)
 streetrx.m[streetrx.m$city == "",]$city <- "Other/Unknown"
+
 ## convert names to upper case to enable matching across cases used
 streetrx.m$city <- sapply(streetrx.m$city, toupper)
 cities$city <- sapply(cities$city, toupper)
 city.mapping$Old_name <- sapply(city.mapping$Old_name, toupper)
 city.mapping$New_name <- sapply(city.mapping$New_name, toupper)
+
 ## find case-corrected city names that match the official database
 city.intsct <- intersect(streetrx.m$city, cities$city)
 city.intsct.df <- as.data.frame(do.call(rbind, as.list(city.intsct)))
 city.intsct.df$Updated_city_name <- city.intsct.df$V1
 streetrx.m <- merge(x = streetrx.m, y = city.intsct.df, by.x = "city", by.y = "V1", all.x = TRUE)
+
 ## For cities that are not in the official city database, check if they are in the dictionary of misprints
 colnames(city.mapping)[2] = "Updated_city_name"
 streetrx.m <- merge(x = streetrx.m, y = city.mapping, by.x = "city", by.y = "Old_name", all.x = TRUE)
 streetrx.m <- streetrx.m %>% mutate(Updated_city_name.x = coalesce(Updated_city_name.x, Updated_city_name.y))
+
 ## If the name still wasn't found, fill in with "Other/Unknown"
 streetrx.m$Updated_city_name.x <- as.character(streetrx.m$Updated_city_name.x)
 streetrx.m[is.na(streetrx.m$Updated_city_name.x),]$Updated_city_name.x <- "Other/Unknown"
@@ -79,11 +83,11 @@ streetrx.m$City_final = paste(streetrx.m$Updated_city_name.x, "-", streetrx.m$st
 streetrx.m$City_final <- as.factor(streetrx.m$City_final)
 ```
 
-Third, we will assess data on the city in which the drugs were purchased. We see that there are 1690 unique "city" values among the 9254 observations. However, when we inspect visually we can see almost immediately that there are numerous entries with different listed names that clearly refer to the same city. This is because users may have used different conventions when supplying city names. For example, users may have listed either "Fort Lauderdale" or "Ft Lauderdale" to refer to the same city, resulting in two different values. We see a range of other common data discrepancies, such as using city nicknames (e.g., "Philly" for Philadelphia), airport codes (e.g., "ATL" for Atlanta), or using the abbreviation used by major sports franchises within the city (e.g., "JAX" for Jacksonville). Various other issues are observed frequently, such as users providing redundant state information (e.g., "Des Moines, IA" instead of just Des Moines), rerring to a city by the specific neighborhood or borrough (e.g., "Brooklyn" instead of "New York") or including single character typos (e.g., "Holywood" instead "Hollywood"). 
+Third, we will assess data on the city in which the drugs were purchased. We see that there are 1690 unique "city" values among the 9254 observations. However, when we inspect visually we can see almost immediately that there are numerous entries with **different listed names that clearly refer to the same city**. This is because users may have used different conventions when supplying city names. For example, users may have listed either "Fort Lauderdale" or "Ft Lauderdale" to refer to the same city, resulting in two different values. We see a range of other common data discrepancies, such as using city nicknames (e.g., "Philly" for Philadelphia), airport codes (e.g., "ATL" for Atlanta), or using the abbreviation used by major sports franchises within the city (e.g., "JAX" for Jacksonville). Various other issues are observed frequently, such as users providing redundant state information (e.g., "Des Moines, IA" instead of just Des Moines), rerring to a city by the specific neighborhood or borrough (e.g., "Brooklyn" instead of "New York") or including single character typos (e.g., "Holywood" instead "Hollywood"). 
 
 In most cases, the original city can be unambiguously identified and corrected manually. First, we will import US census data which defines the official city abbreviation used by each city and cross reference it with the listed data. Luckily, this covers the majority of the entries, but there are still about 300 city values supplied that are not on the list. To address this, we will manually create a new dictionary mapping the noisy value to the corrected value, in the cases identified above where the data can be definitively determined. Then, we apply this mapping to the original data to correct those entries which were non-compliant. During this process we also identified legitimate names of unincorporated areas and townships which were excluded from the original census data, so that we would not be unnecessarily throwing out data from real cities. 
 
-In some cases, the original city cannot be unambiguously identified from the data given. For example, some users listed their zip code, which often crosses city lines. Others listed their county, which include multiple cities, and others listed the general metropolitan area (e.g., "Lehigh Valley" or "Dallas - Fort Worth"). We don't want to guess, so in these cases, we will replace any remaining city names with "Other/Unknown".
+In some cases, the original city cannot be unambiguously identified from the data given. For example, some users listed their zip code, which often crosses city lines. Others listed their county, which include multiple cities, and others listed the general metropolitan area (e.g., "Lehigh Valley" or "Dallas - Fort Worth"). We don't want to guess, so in these cases, we will replace any remaining city names with **Other/Unknown**.
 
 One pitfall that we need to avoid is inappropriately aggregating city data that are not related. For example, the dataset contains both "Hollywood, FL" and "Hollywood, CA". If we ultimately build a hierarchical model with both state and city grouping variables, we do not want to mistakenly label data from those two places as being from different states but the same city. Therefore, we need to augment our coding of the city name by appending the state as well so that each city is uniquely encoded, even if it shares its name with another city in a different state. 
 
@@ -133,42 +137,110 @@ streetrx.m$Primary_Reason <- as.factor(streetrx.m$Primary_Reason)
 ## Step 8: filter out the temporary columns to keep only the processed data
 streetrx.m <- subset(streetrx.m, select=-c(city, yq_pdate, price_date, country, source, api_temp, bulk_purchase, Updated_city_name.x, Updated_city_name.y))
 streetrx.m.comp <- streetrx.m[complete.cases(streetrx.m),]
+
+## Step 9: filter out the observations where ppm equals to zero 
+## price cannot be 0; online market
+streetrx.m.comp[which(streetrx.m.comp$ppm == 0),] 
+streetrx.m.comp.pppm <- streetrx.m.comp %>% filter(ppm != 0)
 ```
 
-Our final task is to do some basic cleaning to some of the other fields. First, we see that the state field includes both the states "USA" and "". We will just convert these to "Other/Unknown" since they don't provide any meaningful information. Second, we see that `bulk_purchase` is coded as a string, which isn't helpful, so we will convert it to a numeric boolean (0 = False, 1 = True). Third, we see that there is nothing listed under the `Primay_Reason` field when the user did not enter the reason for the purchase. We will just mark that as "Other/Unknown" as we have with the other fields.
+Our final task is to do some basic cleaning to some of the other fields. First, we see that the state field includes both the states "USA" and "". We will just convert these to "Other/Unknown" since they don't provide any meaningful information. Second, we see that `bulk_purchase` is coded as a string, which isn't helpful, so we will convert it to a numeric boolean (0 = False, 1 = True). Third, we see that there is nothing listed under the `Primay_Reason` field when the user did not enter the reason for the purchase. We will just mark that as "Other/Unknown" as we have with the other fields.  
+
+
+```{r rename data}
+data <- streetrx.m.comp.pppm
+```
 
 ## Exploratory Data Analysis
+
 In this part, we will explore the distributions of numeric data, potential relationships we might include in the model, and potential correlations.
 
 ### Examining distributions of the numeric data
 
+
 ```{r}
-summary(streetrx.m.comp)
+summary(data)
 ```
+
+**Response Variable**
+
 ```{r}
-streetrx.m.comp[which(streetrx.m.comp$ppm == 0),] #price cannot be 0; online market
-streetrx.m.comp.pppm <- streetrx.m.comp %>% filter(ppm != 0)
+ggplot(data) +
+  geom_density(aes(x = ppm)) +
+  theme_bw(base_size=16)
 ```
+
+Obviously, the response variable is highly right skewed, so we try to log transform it. 
 
 ```{r}
 # response transform
-ggplot(data = streetrx.m.comp.pppm) + 
+ggplot(data) + 
   geom_density(aes(x = log(ppm))) +
   theme_bw(base_size = 16)
 ```
 
+**Group Variables** 
+
+1. City 
+
+
+```{r}
+set.seed(100)
+sample_city <- sample(unique(data$City_final), 25, replace=FALSE)
+ggplot(data[is.element(data$City_final, sample_city),], 
+       aes(x=City_final, y=log(ppm), fill=City_final)) + 
+  geom_boxplot() + 
+  labs(title="log ppm by city", 
+       y="log(ppm)") + theme_classic() + 
+  theme(legend.position="none", 
+        axis.text.x= element_text(angle=90, hjust=1),
+        axis.title.x = element_blank(), 
+        plot.title = element_text(hjust=0.5))
+```
+
+2. State 
+
+```{r}
+set.seed(100)
+sample_state <- sample(unique(data$state), 25, replace=FALSE)
+ggplot(data[is.element(data$state, sample_state),], 
+       aes(x=state, y=log(ppm), fill=state)) + 
+  geom_boxplot() + 
+  labs(title="log ppm by state", 
+       y="log(ppm)") + theme_classic() + 
+  theme(legend.position="none", 
+        axis.text.x= element_text(angle=90, hjust=1),
+        axis.title.x = element_blank(), 
+        plot.title = element_text(hjust=0.5))
+```
+
+3. Region 
+
+```{r}
+ggplot(data, aes(x=USA_region, y=log(ppm), fill=USA_region)) + 
+  geom_boxplot() + 
+  labs(title="log ppm by USA_region", 
+       y="log(ppm)") + theme_classic() + 
+  theme(legend.position="none", 
+        axis.text.x= element_text(angle=90, hjust=1),
+        axis.title.x = element_blank(), 
+        plot.title = element_text(hjust=0.5))
+```
+
+In summary, from the above boxplots, it seems that `city_Final` is a very good grouping variable, though some cities have quite small sample sizes, which is not good for a grouping variable. `state` might be a good grouping variable, but some of the `state` do not vary in the response variable `log(ppm)`, which is not good for a grouping variable. It seems that `USA_region` is not a good grouping variable since the `log(ppm)` seems not to vary across `USA_region`.  
+
 ```{r ,warning=FALSE, error=FALSE}
 ##test_norm(streetrx.m.comp$ppm)
 ##test_norm(log(streetrx.m.comp$ppm + 0.01))
-levels(as.factor(streetrx.m.comp$mgstr))
+levels(as.factor(data$mgstr))
 ```
 
 ```{r}
-plot(log(streetrx.m.comp.pppm$ppm)~streetrx.m.comp.pppm$mgstr) # does not seem to have relationship; slightly negative
+plot(log(data$ppm)~data$mgstr) # does not seem to have relationship; slightly negative
 ```
 
 ```{r}
-plot(log(streetrx.m.comp.pppm$ppm + 0.01)~streetrx.m.comp.pppm$Days_since_010110) #does not seem to have relationship
+plot(log(data$ppm)~data$Days_since_010110) #does not seem to have relationship
 ```
 
 Our data processing from above results in three numeric variables and several categorical variables. First, we examine the `ppm` variable, our primary outcome variable. Even though the values don't vary over many orders of magnitude, it has extreme right skew. Taking the log of these values appears to dramatically improve various indicators of normality, includng the Q-Q plot and histogram, and while the data still fails a Shapiro-Wilk normality assessment this transform appears reasonable for the data. 
@@ -181,7 +253,7 @@ The final numeric variable we consider is the linear temporal variable we create
 ### Examining Relationships
 
 ```{r}
-ggplot(data = streetrx.m.comp.pppm,
+ggplot(data = data,
        aes(x = Primary_Reason, y = log(ppm), color = Primary_Reason)) +
   geom_violin() +
   geom_jitter(position = position_dodge(0.5), alpha = 0.3) +
@@ -193,7 +265,7 @@ ggplot(data = streetrx.m.comp.pppm,
 ```
 
 ```{r}
-ggplot(data = streetrx.m.comp.pppm,
+ggplot(data = data,
        aes(x = Source_class, y = log(ppm), color = Source_class)) +
   geom_violin() +
   geom_jitter(position = position_dodge(0.5), alpha = 0.3) +
@@ -205,8 +277,8 @@ ggplot(data = streetrx.m.comp.pppm,
 ```
 
 ```{r}
-boxplot(log(streetrx.m.comp.pppm$ppm)~streetrx.m.comp.pppm$Bulk)
-table(streetrx.m.comp.pppm$mgstr,streetrx.m.comp.pppm$Bulk)
+boxplot(log(data$ppm)~data$Bulk)
+table(data$mgstr,data$Bulk)
 ```
 
 ## Model design
@@ -223,6 +295,94 @@ I propose a model that accounts for the following predictors:
 - Information source as a categorical predictor
 
 We will also want to consider interaction effects. Different states and cities may have different baseline prices, but they also may have different market trends. For example, the effect of increased purchase size on price may vary across locations depending on how risky it is to carry larger quantities of drugs in different jurisdictions. Similarly, temporal price trends may vary depending on new local regulations that are enacted in some places but not others. Therefore, the model should include not just random intercepts for state and city, but also random slopes for both purchase date and purchase size. 
+
+### Group Variable Checking 
+
+```{r}
+group_model_city <- lmer(log(ppm) ~ 1 + (1|City_final), REML=FALSE, data)
+summary(group_model_city)
+```
+```{r results=FALSE}
+# coef(group_model_city)
+```
+
+```{r}
+group_model_state <- lmer(log(ppm) ~ 1 + (1|state), REML=FALSE, data)
+summary(group_model_state)
+```
+
+```{r message=FALSE, warning=FALSE}
+sjPlot::plot_model(group_model_state, type="re")
+```
+
+```{r}
+group_model_region<- lmer(log(ppm) ~ 1 + (1|USA_region), REML=FALSE, data)
+summary(group_model_region)
+```
+```{r}
+sjPlot::plot_model(group_model_region, type="re")
+```
+
+
+
+```{r}
+group_model_city_state <- lmer(log(ppm) ~ 1 + (1|state) + (1|City_final), REML=FALSE, data)
+group_model_city_region <- lmer(log(ppm) ~ 1 + (1|City_final) + (1|USA_region), REML=FALSE, data)
+group_model_state_region <- lmer(log(ppm) ~ 1 + (1|state) + (1|USA_region), REML=FALSE, data)
+group_model_city_state_region <- lmer(log(ppm) ~ 1 + (1|state) + (1|City_final) + (1|USA_region), REML=FALSE, data)
+```
+
+
+
+**Compare Group Models** 
+
+
+```{r}
+# group_model_city_state_region wins 
+anova(group_model_city_region, group_model_city_state_region)
+```
+
+```{r}
+# group_model_state_region wins 
+anova(group_model_state_region, group_model_city_state_region)
+```
+
+
+```{r}
+# group_model_city_state wins 
+anova(group_model_city_state, group_model_city_state_region)
+```
+From the above result, we could see that, according to the bic score, `group_model_city_state`, `group_model_state_region` < `group_model_city_state_region` < `group_model_city_region`. 
+
+Then, we apply the following comparisons. 
+
+```{r}
+# group_model_city_state wins 
+anova(group_model_city, group_model_city_state)
+```
+
+```{r}
+# group_model_state_wins 
+anova(group_model_city_state, group_model_state)
+```
+
+```{r}
+# group_model_state wins 
+anova(group_model_state_region, group_model_state)
+```
+
+```{r}
+# group_model_state_region wins 
+anova(group_model_state_region, group_model_region)
+```
+
+
+Now, we have built the hierarchy as follows, according to the bic score, ranking according to the value of the bic score. The smaller bic score, the better.  
+
+`group_model_city_state`, `group_model_state_region` < `group_model_city_state_region` < `group_model_city_region`. 
+
+`group_model_state` < `group_model_city_state` < `group_model_city`
+`group_model_state` < `group_model_region_state` < `group_model_region`. 
 
 
 ```{r }
