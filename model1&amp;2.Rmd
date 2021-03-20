@@ -13,71 +13,56 @@ library(tidyr)
 library(brms)
 library(lattice)
 library(rstan)
+library(lme4)
+library(knitr)
+library(sjmisc)
+library(sjPlot)
+library(influence.ME)
+
 ```
 
-```{r}
+```{r, warning=FALSE, echo=FALSE}
 load("models_only.RData")
 ```
 
 ## Model design
 
-Our processed dataset includes 12 possible variables we can use to predict drug purchase price: location data including region, state, and city; temporal data including month, date, year, and days elapsed since a reference point; purchase format data including the quantity, form, and whether the purchase was in bulk; and other information including the purchase rationale and the source of the data. 
-
-One thing we note is that several of these variables are redundant. For example, if geographic variation captures significant variability in the purchase price, then using state as a predictor alone may be more valuable than combining state with region, which is somewhat arbitrarily segmented. Similarly, the date and year in which drugs were purchased will have limited additional value beyond the linear time encoding we already have. Finally, the subjective bulk purchase indicator variable is not informative given the objective purchase quantity data we already have, so we most likely would not want to include this term in the model.
-
-(model 1)
-I propose a model that accounts for the following predictors:
-- Location: a hierarchy of random effects for the state and city in which the drugs were purchased
-- Time: encoded as a linear covariate, plus month as a categorical indicator of seasonal trends (since drug supply may vary in different months due to aggricultural considerations)
-- Purchase size as a linear covariate
-- Purchase rationale as a categorical predictor
-- Information source as a categorical predictor
-
-We will also want to consider interaction effects. Different states and cities may have different baseline prices, but they also may have different market trends. For example, the effect of increased purchase size on price may vary across locations depending on how risky it is to carry larger quantities of drugs in different jurisdictions. Similarly, temporal price trends may vary depending on new local regulations that are enacted in some places but not others. Therefore, the model should include not just random intercepts for state and city, but also random slopes for both purchase date and purchase size. 
-
-(model 2 with interaction between City_final and Source_class)
-(model 3 with Date_Month for seasonal trend)
-
-
-```{r }
-model1 <-brm(log(ppm) ~ (1|City_final) + (1|state)  + mgstr + Primary_Reason + Source_class + Days_since_010110, 
-             data = streetrx.m.comp.pppm,
-             iter = 7000,
-             warmup = 2000,
-             family = gaussian())
+```{r, warning=FALSE, echo=FALSE}
+data = streetrx.m.comp.pppm
 ```
 
-```{r}
-summary(model1)
-```
+Conclusion
 
-```{r}
-model2 <- brm(log(ppm) ~ (1|City_final)*Source_class + (1|state) + mgstr + Primary_Reason + Days_since_010110, 
-                warmup = 2000,
-                data = streetrx.m.comp.pppm, 
-                family = gaussian(), 
-                iter = 7000)
-```
-
-```{r}
-summary(model1)
-```
-
-```{r}
-#seasonal effects
-model3 <-  brm(log(ppm) ~ (1|City_final) + (1|state) + mgstr + Primary_Reason + Source_class + Date_Month + Days_since_010110, 
-                data = streetrx.m.comp.pppm, 
-                warmup = 2000,
-                family = gaussian(), 
-                iter = 7000)
-summary(model3)
+```{r, warning=FALSE, echo=FALSE}
+model =  lmer(log(ppm) ~ (1|state) + mgstr + as.factor(Bulk), REML=FALSE, data)
 ```
 
 
+```{r, warning=FALSE, echo=FALSE}
+kable(fixef(model), caption = "Fixed Effect")
+```
 
 
+```{r, warning=FALSE, echo=FALSE}
+sjPlot::plot_model(model, type="re")
+```
+
+Our model only includes three variables: State, mgstr, and Bulk. Mgstr and Bulk are fixed effects and State has a random effect.
+
+Lets first check the fixed effect in this model. As we can see form the fixed effect table, the intercept for this model is -0.59, which means the price of the drug would be $e^{-0.59} = 0.554$ while the dosage strength is 0 and Bulk is also 0. For mgstr, its coefficent is -0.01, which means a 1 unit increase in dosage strength will lead to a 0.01 decrease in log price per mg while holding all other coefficients constant. That is to say, a 1 unit increase in mgstr will lead to original price increase by $e^{-0.01} = 0.99$. For Bulk, if we switch the category of bulk from 0 to 1 while holding all other coefficients constant, then the intercept of the log price will decrease 0.103, which means the original price per gram will incrase by $e^{-0.103} = 0.902$ while holding all other coefficents constant.
+
+For random effect, as we can see from the graph, there is certain degree random effect in the model although their contribution is small compared to within group variance. For states like Tennessee, Virginia, and Oklahama, the log price would be higher. However, for states like Arizona, California, and Neveda, the log price would be lower. 
 
 
+```{r, fig.width=3, fig.height=3, warning=FALSE, echo=FALSE}  
+plot(model, type=c("p","smooth"), col.line=1, main = "Residuals vs Fitted")
+lattice::qqmath(model, main = "Normal QQ")
+plot(model,sqrt(abs(resid(.)))~fitted(.), type=c("p","smooth"), col.line=1, main = "Scale-Location")
+plot(model, rstudent(.) ~ hatvalues(.), main = "Residuals")
+```
+
+
+Above plots are the diagonistic plots for the model. In the first plot, all of the points are nearly randomly distributed around the 0 line except a small pattern. However, that pattern is acceptable. The QQ plot shows the target variable is deviated fromm the normal distribution. That deviation is expected because the distribution of the $log(price)$ is not that normally distributed as shown above. For the scale-location plot, there is not an obvious pattern in the graph, which means the variance of the residual is constant across all level of predictions. In the last plot, there are also not any influential outliers exist. Thus our model is good.
 
 
 
