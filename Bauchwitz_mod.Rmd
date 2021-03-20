@@ -384,6 +384,11 @@ Now, we have built the hierarchy as follows, according to the bic score, ranking
 `group_model_state` < `group_model_city_state` < `group_model_city`
 `group_model_state` < `group_model_region_state` < `group_model_region`. 
 
+```{r}
+m1 <- lm(log(ppm) ~ as.factor(City_final), data)
+m2 <- lm(log(ppm) ~ as.factor(City_final) + as.factor(state), data)
+anova(m1, m2)
+```
 
 ```{r }
 model1 <-brm(log(ppm) ~ (1|City_final) + (1|state)  + mgstr + Primary_Reason + Source_class + Days_since_010110, 
