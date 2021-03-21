@@ -1,5 +1,5 @@
 ---
-title: "Ben Bauchwitz Case Study 1"
+title: "Case Study 1 Writeup"
 output: pdf_document
 ---
 
@@ -52,7 +52,19 @@ Then, we inspected data defining the **source** of the price transaction data. M
 
 Our final data cleaning step included many minor issue corrections and basic cleaning of other predictor. First, we noticed that the state field included both the `state` values "USA" and "". We converted these values to "Other/Unknown" category since they did not provide any meaningful information. Second, we saw that `bulk_purchase` was coded as a string, which wasn't helpful, so we converted it to a numeric boolean (0 = False, 1 = True). Third, we observed that there was nothing listed under the `Primay_Reason` field when the user did not enter the reason for the purchase. We marked such entries with missing values as "Other/Unknown" as we have with the other fields.  
 
- 
+In summary, after the data cleaning process, we obtained a data set with 8712 observations and nine predictors, which were `ppm` (response variable), `state`, `city`, `region`, `primary reason`, `source`, `days ellapsed`, and `dosage strength`.  
+
+- `ppm`: price of morphine per milligram, numeric value. 
+- `city`: cities, where the transaction took place, 1654 unique factors.
+- `state``: states, where the transaction took place, 56 unique factors.
+- `region``: regions, where the transaction took place, 5 unique factors.
+- `primary reason`: reasons for purchasing morphine, 11 unique factors.
+- `source`: sources of such transactions, 8 unique values. 
+- `days ellapsed`: number of days passed since 01/01/2010, when the data collection process started, discrete numerical value.  
+- `dosage strength`: dosage strength of the purchased morphine, discrete numeric value, ranging from 1 to 200.  
+- `bulk`: indicator for purchased 10+ units, factor, 0 and 1. 
+
+The data analysis and modeling were performed upon the clean data set with the above predictors. 
 
 
 ```{r , warning=FALSE, error=FALSE}
@@ -106,8 +118,6 @@ streetrx.m$City_final <- as.factor(streetrx.m$City_final)
 ```
 
 
-### Aggregating source data
-
 ```{r , include=FALSE, warning=FALSE, echo=FALSE, error=FALSE}
 ## Step 4: convert the source data to a factor with 7 levels:
 ## (1) word of mouth   (2) online search   (3) online forum   (4) personal
@@ -128,9 +138,6 @@ streetrx.m[grep("yahoo", streetrx.m$source, ignore.case = TRUE),]$Source_class =
 streetrx.m$Source_class <- as.factor(streetrx.m$Source_class)
 ```
 
-
-
-### Cleaning other fields
 
 ```{r , include=FALSE, warning=FALSE, echo=FALSE, error=FALSE}
 ## Step 5: eliminate noisy state data by converting the states "USA" and "" to "Other/Unknown"
@@ -166,600 +173,53 @@ data <- streetrx.m.comp.pppm
 ```
 
 
-## Exploratory Data Analysis
-
-In this part, we will explore the distributions of numeric data, potential relationships we might include in the model, and potential correlations.
-
-### Examining distributions of the numeric data
-
-
-```{r}
-summary(data)
-```
-
-**Response Variable**
-
-```{r}
-ggplot(data) +
-  geom_density(aes(x = ppm)) +
-  theme_bw(base_size=16)
-```
-
-Obviously, the response variable is highly right skewed, so we try to log transform it. 
-
-```{r}
-# response transform
-ggplot(data) + 
-  geom_density(aes(x = log(ppm))) +
-  theme_bw(base_size = 16)
-```
-
-**Group Variables** 
-
-1. City 
-
-
-```{r}
-set.seed(100)
-sample_city <- sample(unique(data$City_final), 25, replace=FALSE)
-ggplot(data[is.element(data$City_final, sample_city),], 
-       aes(x=City_final, y=log(ppm), fill=City_final)) + 
-  geom_boxplot() + 
-  labs(title="log ppm by city", 
-       y="log(ppm)") + theme_classic() + 
-  theme(legend.position="none", 
-        axis.text.x= element_text(angle=90, hjust=1),
-        axis.title.x = element_blank(), 
-        plot.title = element_text(hjust=0.5))
-```
-
-2. State 
-
-```{r}
-set.seed(100)
-sample_state <- sample(unique(data$state), 25, replace=FALSE)
-ggplot(data[is.element(data$state, sample_state),], 
-       aes(x=state, y=log(ppm), fill=state)) + 
-  geom_boxplot() + 
-  labs(title="log ppm by state", 
-       y="log(ppm)") + theme_classic() + 
-  theme(legend.position="none", 
-        axis.text.x= element_text(angle=90, hjust=1),
-        axis.title.x = element_blank(), 
-        plot.title = element_text(hjust=0.5))
-```
-
-3. Region 
-
-```{r}
-ggplot(data, aes(x=USA_region, y=log(ppm), fill=USA_region)) + 
-  geom_boxplot() + 
-  labs(title="log ppm by USA_region", 
-       y="log(ppm)") + theme_classic() + 
-  theme(legend.position="none", 
-        axis.text.x= element_text(angle=90, hjust=1),
-        axis.title.x = element_blank(), 
-        plot.title = element_text(hjust=0.5))
-```
-
-In summary, from the above boxplots, it seems that `city_Final` is a very good grouping variable, though some cities have quite small sample sizes, which is not good for a grouping variable. `state` might be a good grouping variable, but some of the `state` do not vary in the response variable `log(ppm)`, which is not good for a grouping variable. It seems that `USA_region` is not a good grouping variable since the `log(ppm)` seems not to vary across `USA_region`.  
-
-
-**Fixed Effect Predictors** 
-
-1. Days 
-
-First, consider fixed effects for days, which are not by groups. 
-```{r}
-plot(log(data$ppm)~data$Days_since_010110) #does not seem to have relationship
-```
-
-Second, consider the effects of days in each group, here, presumably, `state`. 
-
-```{r}
-set.seed(108)
-sample_state <- sample(unique(data$state), 6, replace=FALSE)
-ggplot(data[is.element(data$state, sample_state), ], aes(x=Days_since_010110, y=log(ppm), color=state)) +
-  geom_point() + 
-  geom_smooth(method="lm", fill=NA)
-```
-It seems that in most states, the price does not change according to `days`. It might worthing trying to add fixed affects of `days` by `state` to the model.  
-
-
-2. Primary Reason 
-
-```{r}
-ggplot(data, aes(x=Primary_Reason, y=log(ppm), fill=Primary_Reason)) +
-  geom_boxplot() + 
-  labs(title="log ppm by Primary Reason", 
-       y="log(ppm)") + 
-  theme_classic() + 
-  scale_x_discrete(labels=c("0 No Answer", "10 Pain", "11 Come Down", "13 No Report", "3 Deal w/ Withdrawal", "4 Get High", "5 Resell", "6 Other", "7 DK", "8 Private", "9 Self-treat Pain")) + 
-  theme(legend.position="none", 
-        axis.text.x= element_text(angle=90, hjust=1),
-        axis.title.x = element_blank(), 
-        plot.title = element_text(hjust=0.5)) 
-```
-
-What is the difference between the group 0 and group 13? 
-
-It seems that, in general, `log(ppm)` does not differ too much across different `Primary_Reason` values. 
-
-```{r}
-set.seed(102)
-sample_state <- sample(unique(data$state), 4, replace=FALSE)
-ggplot(data[is.element(data$state, sample_state), ], aes(x=Primary_Reason, y=log(ppm), fill=Primary_Reason)) +
-  geom_boxplot() + 
-  labs(title="log ppm vs Primary Reason by state", 
-       y="log(ppm)") + theme_classic() + 
-  scale_x_discrete(labels=c("0", "10", "11", "13", "3", "4", "5", "6", "7", "8", "9")) + 
-  theme(legend.position="none",
-        axis.title.x = element_blank(), 
-        plot.title = element_text(hjust=0.5)) + 
-  facet_wrap(~state, ncol=2)
-```
-
-```{r}
-set.seed(103)
-sample_state <- sample(unique(data$state), 4, replace=FALSE)
-ggplot(data[is.element(data$state, sample_state), ], aes(x=Primary_Reason, y=log(ppm), fill=Primary_Reason)) +
-  geom_boxplot() + 
-  labs(title="log ppm vs Primary Reason by state", 
-       y="log(ppm)") + theme_classic() + 
-  scale_x_discrete(labels=c("0", "10", "11", "13", "3", "4", "5", "6", "7", "8", "9")) + 
-  theme(legend.position="none",
-        axis.title.x = element_blank(), 
-        plot.title = element_text(hjust=0.5)) + 
-  facet_wrap(~state, ncol=2)
-```
-
-It seems that, with-in each `state`, the `log(ppm)` differ according to different `Primary_Reason` values. Therefore, it is possible to include random effects of `Primary_Reason` by `state` in the model.  
-
-
-3. Source 
-
-```{r}
-ggplot(data, aes(x=Source_class, y=log(ppm), fill=Source_class)) +
-  geom_boxplot() + 
-  labs(title="log ppm by Source_class", 
-       y="log(ppm)") + 
-  theme_classic()  + 
-  theme(legend.position="none", 
-        axis.text.x= element_text(angle=90, hjust=1),
-        axis.title.x = element_blank(), 
-        plot.title = element_text(hjust=0.5)) 
-```
-
-It seems that in general, the `log(ppm)` varies according to the value of the `Source_class` predictor.  
-
-```{r}
-set.seed(103)
-sample_state <- sample(unique(data$state), 8, replace=FALSE)
-ggplot(data[is.element(data$state, sample_state), ], aes(x=Source_class, y=log(ppm), fill=Source_class)) +
-  geom_boxplot() + 
-  labs(title="log ppm vs Source by state", 
-       y="log(ppm)") + theme_classic() + 
-  theme(legend.position="none",
-        axis.title.x = element_blank(), 
-        axis.text.x= element_text(angle=90, hjust=1), 
-        plot.title = element_text(hjust=0.5)) + 
-  facet_wrap(~state, ncol=4)
-```
-
-I think it might be worth trying to add `Source_class` as a random slope by `state` to the model.  
-
-
-4.Bulk  
-
-```{r}
-ggplot(data, aes(x=as.factor(Bulk), y=log(ppm), fill=as.factor(Bulk))) +
-  geom_boxplot() + 
-  labs(title="log ppm by Bulk", 
-       y="log(ppm)") + 
-  theme_classic()  + 
-  theme(legend.position="none", 
-        axis.text.x= element_text(angle=90, hjust=1),
-        axis.title.x = element_blank(), 
-        plot.title = element_text(hjust=0.5)) 
-```
-
-```{r}
-set.seed(104)
-sample_state <- sample(unique(data$state), 8, replace=FALSE)
-ggplot(data[is.element(data$state, sample_state), ], aes(x=as.factor(Bulk), y=log(ppm), fill=as.factor(Bulk))) +
-  geom_boxplot() + 
-  labs(title="log ppm vs Bulk by state", 
-       y="log(ppm)") + theme_classic() + 
-  theme(legend.position="none",
-        axis.title.x = element_blank(), 
-        axis.text.x= element_text(angle=90, hjust=1), 
-        plot.title = element_text(hjust=0.5)) + 
-  facet_wrap(~state, ncol=4)
-```
-
-5. Dosage Strength 
-
-```{r ,warning=FALSE, error=FALSE}
-##test_norm(streetrx.m.comp$ppm)
-##test_norm(log(streetrx.m.comp$ppm + 0.01))
-levels(as.factor(data$mgstr))
-```
-
-```{r}
-plot(log(data$ppm)~data$mgstr) # does not seem to have relationship; slightly negative
-```
-
-
-```{r}
-set.seed(105)
-sample_state <- sample(unique(data$state), 8, replace=FALSE)
-ggplot(data[is.element(data$state, sample_state), ], aes(x=as.factor(mgstr), y=log(ppm), fill=as.factor(mgstr))) +
-  geom_boxplot() + 
-  labs(title="log ppm vs Dosage Strength by state", 
-       y="log(ppm)") + theme_classic() + 
-  theme(legend.position="none",
-        axis.title.x = element_blank(), 
-        axis.text.x= element_text(angle=90, hjust=1), 
-        plot.title = element_text(hjust=0.5)) + 
-  facet_wrap(~state, ncol=4)
-```
-
-According to the above results, the result indicates that it is preferred to include the random slopes of `dosage strength` by `state` in the model. 
-
-
-Our data processing from above results in three numeric variables and several categorical variables. First, we examine the `ppm` variable, our primary outcome variable. Even though the values don't vary over many orders of magnitude, it has extreme right skew. Taking the log of these values appears to dramatically improve various indicators of normality, includng the Q-Q plot and histogram, and while the data still fails a Shapiro-Wilk normality assessment this transform appears reasonable for the data. 
-
-A second issue we observe is in the reported purchase quantities (the variable `mgstr`). Although this variable is numeric, values are reported at discrete intervals, perhaps due to standard packaging sizes or users rounding off the values that they reported. All told, there are 16 unique values ranging from 1 to 200. We have two options: treat this as a categorical variable or accept the sparse numeric coding. If we do ultimately evaluate `mgstr` in our model, it does not seem that we would be interested in categorical relationships. In other words, we don't have any reason to believe there is something unique about individual package size levels. Instead, we are concerned with the general trend in how different volumes affect price. Since 16 points is more than adequate to fit a line in most applications and since the data we've collected has multiple volume sizes at each order of magnitude, it seems reasonable to continue with the numeric encoding.
-
-The final numeric variable we consider is the linear temporal variable we created, which is number of days since Jan 1, 2010. This lets us encode time in a semi-continuous manner. Despite the discreet encoding, the data actually functions quite well as a numeric predictor since there is high resolution relative to the overall time scale. The only thing that is apparent is that when we plot the price data against over time, the data is clearly sparser earlier in streetrx's history. However, with the appropriate parameter selection, this should not be a significant issue in the overall models we will create.
-
-
-### Examining Relationships
-
-```{r}
-ggplot(data = data,
-       aes(x = Primary_Reason, y = log(ppm), color = Primary_Reason)) +
-  geom_violin() +
-  geom_jitter(position = position_dodge(0.5), alpha = 0.3) +
-  theme(axis.text.x = element_text(angle = 60, vjust = 1, hjust=1))+
-  theme(legend.position = "none")+
-  xlab("Purchase Rationale") +
-  ylab("log(ppm)") +
-  ggtitle(label="Relationship between Purchase Rationale and log(ppm)")
-```
-
-```{r}
-ggplot(data = data,
-       aes(x = Source_class, y = log(ppm), color = Source_class)) +
-  geom_violin() +
-  geom_jitter(position = position_dodge(0.5), alpha = 0.3) +
-  theme(axis.text.x = element_text(angle = 60, vjust = 1, hjust=1))+
-  theme(legend.position = "none")+
-  xlab("Information Source") +
-  ylab("log(ppm)") +
-  ggtitle(label="Relationship between Information Source and log(ppm)")
-```
-
-```{r}
-boxplot(log(data$ppm)~data$Bulk)
-table(data$mgstr,data$Bulk)
-```
-
 ## Model design
 
-Our processed dataset includes 12 possible variables we can use to predict drug purchase price: location data including region, state, and city; temporal data including month, date, year, and days elapsed since a reference point; purchase format data including the quantity, form, and whether the purchase was in bulk; and other information including the purchase rationale and the source of the data. 
 
-One thing we note is that several of these variables are redundant. For example, if geographic variation captures significant variability in the purchase price, then using state as a predictor alone may be more valuable than combining state with region, which is somewhat arbitrarily segmented. Similarly, the date and year in which drugs were purchased will have limited additional value beyond the linear time encoding we already have. Finally, the subjective bulk purchase indicator variable is not informative given the objective purchase quantity data we already have, so we most likely would not want to include this term in the model.
+**Group Variable Selection** 
 
-I propose a model that accounts for the following predictors:
-- Location: a hierarchy of random effects for the state and city in which the drugs were purchased
-- Time: encoded as a linear covariate, plus month as a categorical indicator of seasonal trends (since drug supply may vary in different months due to aggricultural considerations)
-- Purchase size as a linear covariate
-- Purchase rationale as a categorical predictor
-- Information source as a categorical predictor
+Before determining other predictors to be included in the model, we would like to select the best location group variable which explained the heterogeneity of morphine price over that location level first. To this end, we used two approaches to achieve this end. First, by inspecting the EDA figures, (**Figures Needed Here**), we could observe that the `log(ppm)` did not differ too much across `region` variable, but there were some variations in `log(ppm)` across the sampled cities and sampled states. Therefore, we suspected that `region` might not be a good predictor explaining the heterogeneity across `region` locations. As for `city` variable, the sample sizes within each unique `city` were typically very small, so it was probably not optimal to be included as the only location group variable in the model. The `state` variable seemed to be optimal for location group variables. In addition, we also would like consider more than one location group variables in the final model.  
 
-We will also want to consider interaction effects. Different states and cities may have different baseline prices, but they also may have different market trends. For example, the effect of increased purchase size on price may vary across locations depending on how risky it is to carry larger quantities of drugs in different jurisdictions. Similarly, temporal price trends may vary depending on new local regulations that are enacted in some places but not others. Therefore, the model should include not just random intercepts for state and city, but also random slopes for both purchase date and purchase size. 
+With these suspicions and ideas in mind, we built hierarchical models with random effects on every possible combination of the three location variables, which were `city`, `region`, and `state`. There were seven models in total, which were composed by 3 hierarchical models including each location variable only, three hierarchical models each including a unique pair of the three location variables, and finally the last hierarchical model including all three location variables. Then, we compared these seven models using BIC values as criterion based on the principle that, in each comparison, the two models differed in at most one variable. For example, we could compare the BIC score of the model of random effects in `city` and `region` with the BIC score of the model of random effect in `city`. But we could not compare the model of random effects in `city` and `region` with the model of random effects in `city` and `state`. This principle could also be observed in the model comparison results, which were shown below and ranked by BIC values. 
 
-### Group Variable Checking 
+1. (`state`) < [(`state`, `city`), (`state`, `region`)] < (`state`, `city`, `region`) < (`city`, `region`).  
+2. (`state`, `city`) < (`city`).  
+3. (`state`, `region`) < (`region`).  
 
-```{r}
-group_model_city <- lmer(log(ppm) ~ 1 + (1|City_final), REML=FALSE, data)
-summary(group_model_city)
-```
-```{r results=FALSE}
-# coef(group_model_city)
-```
+Here are some explanations of the notations. (`state`) indicates the model with random effect in `state` only, without any other predictors. (`state`, `region`) indicates the model with random effects in both `state` and `region`, no any other predictors involved. And if model1 < model2, it means that the BIC score of model 1 is smaller than the BIC score of model2.  
 
-```{r}
-group_model_state <- lmer(log(ppm) ~ 1 + (1|state), REML=FALSE, data)
-summary(group_model_state)
-```
+From the above results, it was easy to see that, according to the BIC scores, the model with random effect in `state` only was the best. Therefore, we chose to use `state` as the only group variable in locations with random effect.  
 
-```{r message=FALSE, warning=FALSE}
-sjPlot::plot_model(group_model_state, type="re")
-```
+**Selection Among Other Variables**  
 
-```{r}
-group_model_region<- lmer(log(ppm) ~ 1 + (1|USA_region), REML=FALSE, data)
-summary(group_model_region)
-```
-```{r}
-sjPlot::plot_model(group_model_region, type="re")
-```
+Now, the base model only involves the location variable `state` with random effect.  
 
+First, from the **(mgstr EDA graph)**, we could see that there was a slightly negative relationship between the `log(ppm)` and the `mgstr` variable. Since the `ppm` was log-transformed, a slightly negative coefficient between `log(ppm)` and `mgstr` might be enlarged after exponentiation. Therefore, we considered the `mgstr` (dosage strength) as a quite important predictor and added it to the model to make comparisons based on the BIC score. By comparing with the base model, the model with the addition of `mgstr` as a fixed effect had much lower BIC score. Therefore, we decided to include `mgstr` in the model. Now, the model contained random effect of `state` and fixed effect of `mgstr`.  
 
+From the **EDA plots**, we also considered to add random slopes of `mgstr` by `state` to the model. However, by doing so, the BIC score of the model increased a lot compared to the model without random slope of `mgstr` by `state`. Therefore, `mgstr` was added to the model only as a fixed effect.  
 
-```{r}
-group_model_city_state <- lmer(log(ppm) ~ 1 + (1|state) + (1|City_final), REML=FALSE, data)
-group_model_city_region <- lmer(log(ppm) ~ 1 + (1|City_final) + (1|USA_region), REML=FALSE, data)
-group_model_state_region <- lmer(log(ppm) ~ 1 + (1|state) + (1|USA_region), REML=FALSE, data)
-group_model_city_state_region <- lmer(log(ppm) ~ 1 + (1|state) + (1|City_final) + (1|USA_region), REML=FALSE, data)
-```
+Second, from the **EDA Figure**, the `log(ppm)` seemed not to vary across `bulk` sizes, both in general and with-in sample states. Therefore, we considered `bulk` as an unimportant variable. However, adding `bulk` to the model slightly lower the BIC score. We preferred not to add random slopes of `bulk` by `state` to the model since within the sampled states, the difference of `log(ppm)` over `bulk` categories seemed not to change. Thus, we decided to add `bulk` to the model as fixed effect only, which now included random effect of `state`, and fixed effects of `mgstr` and `bulk`.  
 
 
+Third, we considered to add `source` and `primary reason` to the model. From the **EDA graphs**, within sampled states, the `source` factor seemed to have different effects on `log(ppm)` across different states. Therefore, we considered to add random slope of `source` by `state` and fixed effect `source` to the model, however, the BIC score of the model increased a lot after adding either fixed effect of `source` or both random effect and fixed effect of `source` to the model. Therefore, the `source` variable was excluded from the model. We also excluded the `Primary Reason`. From the **(Figure Primary)**, we could see that the response variable, `log(ppm)`, did not change across different `Primary Reason` categories. And within the sampled states, the `log(ppm)` also did not change over different `Primary Reason` categories. Therefore, we would like to exclude `Primary Reason` from the final model. In addition, the model with `primary reason` as fixed effect or both random effect and fixed effect increased BIC values a lot, which confirmed our decision not to include it in the model.  
 
-**Compare Group Models** 
 
+Finally, based on the **EDA Figures**, it seemed that there was no obvious relationship between the `log(ppm)` and `days ellapsed`. However, we could observe slightly different slopes of `days ellapsed` within the sampled states. In the meantime, we thought as the local economy changed over time, the price of the morphine might also change over time as well, which also made us believe that the `days ellapsed` should be added to the model. And since each state had different economy development histories, the `days ellapsed` variable might have different relationships with `log(ppm)` in different states, which made us prefer to add random slope of `days ellapsed` by `state` to the model. Therefore, we added `days ellapsed` with random slope by `state` to the model along with its fixed effect. However, either adding fixed effect `days ellapsed` only or adding both random effect and fixed effect would increase the BIC score of the model. Therefore, we finally exclude this variable from the model.  
 
-```{r}
-# group_model_city_state_region wins 
-anova(group_model_city_region, group_model_city_state_region)
-```
 
-```{r}
-# group_model_state_region wins 
-anova(group_model_state_region, group_model_city_state_region)
-```
+**Model Summary**  
 
+From the above reasoning and testing results, our final model could be summarised as the following formula.  
 
-```{r}
-# group_model_city_state wins 
-anova(group_model_city_state, group_model_city_state_region)
-```
-From the above result, we could see that, according to the bic score, `group_model_city_state`, `group_model_state_region` < `group_model_city_state_region` < `group_model_city_region`. 
+$$
+\begin{aligned}
+y_{ij} = \beta_{0,j} \text{ State}_j + \beta_1 \text{ Bulk}_{i,j} &+ \beta_2 \text{ Dosage Strength}_{i,j} + \epsilon_{i,j} \\ 
+\beta_{0,j} = \beta_0 + b_j&; \text{ } b_j \sim \text{Normal}(0, \tau^2) \\ 
+\epsilon_{i.j} \sim &\text{ } \text{Normal}(0, \sigma^2)
+\end{aligned}
+$$
+In the above formula, $b_{j}$ represents the random effects of `state`, and $\epsilon_{i,j}$ is the error term. 
 
-Then, we apply the following comparisons. 
-
-```{r}
-# group_model_city_state wins 
-anova(group_model_city, group_model_city_state)
-```
-
-```{r}
-# group_model_state_wins 
-anova(group_model_city_state, group_model_state)
-```
-
-```{r}
-# group_model_state wins 
-anova(group_model_state_region, group_model_state)
-```
-
-```{r}
-# group_model_state_region wins 
-anova(group_model_state_region, group_model_region)
-```
-
-
-Now, we have built the hierarchy as follows, according to the bic score, ranking according to the value of the bic score. The smaller bic score, the better.  
-
-`group_model_city_state`, `group_model_state_region` < `group_model_city_state_region` < `group_model_city_region`. 
-
-`group_model_state` < `group_model_city_state` < `group_model_city`
-`group_model_state` < `group_model_region_state` < `group_model_region`. 
-
-
-```{r}
-base <- lmer(log(ppm) ~ (1|state), REML=FALSE, data)
-```
-
-
-**Add dosage strength to the model** 
-At this point, I use `state` as the random effect grouping variable.  
-
-```{r}
-fixed_mgstr_model <- lmer(log(ppm) ~ (1|state) + mgstr, REML=FALSE, data)
-# random_mgstr_model <- lmer(log(ppm) ~ as.factor(mgstr) + (as.factor(mgstr)|state), data)
-# mgstr as random effects take forever to run 
-
-anova(base, fixed_mgstr_model)
-```
-```{r}
-fixed_mgstr_model <- lmer(log(ppm) ~ (1|state) + mgstr, REML=FALSE, data)
-random_mgstr_model <- lmer(log(ppm) ~ mgstr + (mgstr|state), data)
-# mgstr as random effects take forever to run 
-
-anova(random_mgstr_model, fixed_mgstr_model)
-```
-It seems that `mgstr` with random slope has lower bic score, but the modeling fails to converge, which is a little bit worrying. 
-
-**Adding Bulk to the Model** 
-
-```{r}
-add_bulk_model <- lmer(log(ppm) ~ (1|state) + Bulk + mgstr, REML=FALSE, data)
-add_bulk_interaction_model <- lmer(log(ppm) ~ (1|state) + Bulk*mgstr, REML=FALSE, data)
-
-anova(add_bulk_model, add_bulk_interaction_model)
-anova(add_bulk_model, fixed_mgstr_model)
-```
-
-```{r}
-add_bulk_model <- lmer(log(ppm) ~ (mgstr|state) + Bulk + mgstr, REML=FALSE, data)
-add_bulk_interaction_model <- lmer(log(ppm) ~ (mgstr|state) + Bulk*mgstr, REML=FALSE, data)
-
-anova(add_bulk_model, add_bulk_interaction_model)
-anova(add_bulk_model, random_mgstr_model)
-```
-From the above results, it seems that adding `Bulk` will decrease the bic value, though it does not decrease the bic value so much. Therefore, I decide to add `Bulk` to the model.  
-
-
-**Adding Primary Reason**  
-Now, the base model becomes the following. 
-
-```{r}
-base <- lmer(log(ppm) ~ (1|state) +  mgstr, REML=FALSE, data) 
-```
-
-```{r}
-add_pr_base_model <- lmer(log(ppm) ~ (1|state) + Primary_Reason+ mgstr, REML=FALSE, data) 
-anova(add_pr_base_model, fixed_mgstr_model)
-```
-
-
-```{r}
-add_pr_base_model <- lmer(log(ppm) ~ (mgstr|state) + Primary_Reason+ mgstr, REML=FALSE, data) 
-anova(add_pr_base_model, random_mgstr_model)
-```
-The `Primary Reason` does not decreases the bic score a lot.
-
-If adding `Primary Reason` to bulk, then, the `Primary Reason` seems to be uselesss.  
-
-```{r}
-add_pr_model <- lmer(log(ppm) ~ (1|state) + Primary_Reason+ Bulk + mgstr, data)
-
-anova(add_pr_model, add_bulk_model)
-```
-From the result, we could see that `Primary_Reason` does not descrease the bic value, so it is not included in the model.  
-
-```{r}
-add_random_pr_model <- lmer(log(ppm) ~ (Primary_Reason|state) + Primary_Reason+ Bulk + mgstr, data)
-
-anova(add_random_pr_model, add_bulk_model)
-```
-Adding `Primary Reason` as a random effect to the model significantly increases the bic value. 
-
-**Adding Source** 
-
-```{r}
-base <- lmer(log(ppm) ~ (1|state) +  mgstr, REML=FALSE, data) 
-```
-
-```{r}
-add_source_model <- lmer(log(ppm) ~ (1|state) + Source_class + mgstr, REML=FALSE, data) 
-anova(add_source_base_model, base)
-```
-```{r}
-add_source_pr_model <- lmer(log(ppm) ~ (1|state) + Primary_Reason + Source_class + mgstr, REML=FALSE, data) 
-anova(add_source_pr_model, add_source_model)
-```
-Note that, `Source_class` is preferred to be included in the model than `Primary_Reason`.  
-
-```{r}
-add_source_bulk_model <- lmer(log(ppm) ~ (1|state) + Source_class + Bulk + mgstr, data)
-anova(add_source_bulk_model, add_bulk_model)
-```
-Adding `Source` to the model does not decrease the bic value of the model. 
-
-```{r}
-# interaction between source and bulk 
-add_source_bulk_interaction_model <- lmer(log(ppm) ~ (1|state) + Source_class * Bulk + mgstr, data)
-anova(add_source_bulk_interaction_model, add_bulk_model)
-```
-The interaction between `Source_class` and `Bulk` does not work, either.  
-
-```{r}
-# Adding source as a random slope to the model  
-add_random_source_model <- lmer(log(ppm) ~ (Source_class|state) + Source_class +  Bulk + mgstr, data)
-anova(add_random_source_model, add_bulk_model)
-
-```
-The `Source_class` as a random effect significantly increases the bic score of the model. 
-
-**Adding Days** 
-Now, the base model becomes the following. 
-
-```{r}
-base <- lmer(log(ppm) ~ (1|state) + Source_class + mgstr, REML=FALSE, data)
-```
-
-
-```{r}
-add_days_model <- lmer(log(ppm) ~ (1|state) + Days_since_010110 +  Source_class + mgstr, REML=FALSE, data)
-
-anova(add_days_model, base)
-```
-They seems to be of equivallent bic score.  
-
-
-```{r}
-# add days with random slope 
-add_random_days_model <- lmer(log(ppm) ~ (Days_since_010110|state) + Days_since_010110 +  Source_class + mgstr, REML=FALSE, data)
-
-anova(add_random_days_model, add_days_model)
-```
-No significant different between this model and the original one. So `Days_since_010110` is not added to the model.  
-
-
-Finally, one model comes out of the comparisons among, `mgstr`, `Bulk`, `Primary_Reason`, `Source_class`, and `Days`, is the following. 
-```{r}
-model <- lmer(log(ppm) ~ (1|state) + Days_since_010110 + Bulk + mgstr, REML=FALSE, data)
-model2 <- lmer(log(ppm) ~ (1|state) + Bulk +  mgstr, REML=FALSE, data) 
-model3 <- lmer(log(ppm) ~ (Days_since_010110|state) + Days_since_010110 + Bulk + mgstr, REML=FALSE, data)
-anova(model3, model2)
-```
-```{r}
-model3 <- lmer(log(ppm) ~ (Days_since_010110|state) + Days_since_010110 + Bulk + mgstr, REML=FALSE, data)
-model4 <- lmer(log(ppm) ~ (Days_since_010110|state) + Days_since_010110 + Bulk + mgstr, REML=FALSE, data)
-```
-```{r}
-icc(model)
-```
-
-```{r}
-icc(model2)
-```
-
-
-
-
-```{r}
-summary(model3)
-```
-```{r}
-summary(model)
-```
-
-
-
-
-
-We also have to investigate whether we have to include the random slopes of `mgstr` to the model. 
-
-```{r }
-model1 <-brm(log(ppm) ~ (1|City_final) + (1|state)  + mgstr + Primary_Reason + Source_class + Days_since_010110, 
-             data = streetrx.m.comp.pppm,
-             iter = 7000,
-             warmup = 2000,
-             family = gaussian())
-```
-
-```{r}
-summary(model1)
-```
-
-```{r}
-model2 <- brm(log(ppm) ~ (1|City_final)*Source_class + (1|state) + mgstr + Primary_Reason + Days_since_010110, 
-                warmup = 2000,
-                data = streetrx.m.comp.pppm, 
-                family = gaussian(), 
-                iter = 7000)
-```
-
-```{r}
-summary(model2)
-```
-
-
-```{r}
-#seasonal effects
-model3 <- blmer(log(ppm) ~ (1|City_final) + (1|state) + mgstr + Primary_Reason + Source_class + Date_Month + Days_since_010110, 
-                data = streetrx.m.comp.pppm, 
-                warmup = 2000,
-                family = gaussian(), 
-                iter = 7000)
-summary(model3)
-```
-
-## Results
 
 ## Potential Limitations
+
