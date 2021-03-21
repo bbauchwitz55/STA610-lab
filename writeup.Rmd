@@ -4,7 +4,7 @@ output: pdf_document
 ---
 
 
-```{r include=FALSE}
+```{r}
 knitr::opts_chunk$set(echo = FALSE)
 ```
 
@@ -23,7 +23,6 @@ library(merTools)
 library(patchwork)
 library(kableExtra)
 
-knitr::opts_chunk$set(echo = F, include = F)
 load("data/streetrx.RData")
 cities <- read.csv("data/simplemaps_uscities_basicv1.73/uscities.csv")
 airports <- read.csv("data/airports.csv")
@@ -392,10 +391,42 @@ In the above formula, $b_{j}$ represents the random effects of `state`, and $\ep
 
 We have neither information about nor strong belief regarding the random effect parameter $\tau^2$ and error term variance $\sigma^2$, we would like apply a non-informational prior on these parameters. Under this condition, the information from the data set has a quite large weight estimating the model parameters, which is similar to fit the model without pirors. Therefore, considering the time cost of running the models, we decided to use the normal hierarchical model, which is specified as above.  
 
+## Findings and Conclusion
 
-## Potential Limitations  
+```{r, warning=FALSE, echo=FALSE}
+model =  lmer(log(ppm) ~ (1|state) + mgstr + as.factor(Bulk), REML=FALSE, data)
+```
 
-forward stepwise selection might miss the optimal model.  
+Table 3. The fixed effect coefficients from the final model shown above.  
+```{r, warning=FALSE, echo=FALSE}
+kable(fixef(model), caption = "Fixed Effect")
+```
+
+
+```{r, warning=FALSE, echo=FALSE, fig.cap="Random Effects of the hierarchical model."}
+sjPlot::plot_model(model, type="re")
+```
+
+Our model only includes three variables: State, mgstr, and Bulk. Mgstr and Bulk are fixed effects and State has a random effect.
+
+Let's first check the fixed effect in this model. As we can see form the fixed effect table, the intercept for this model is -0.59, which means the price of the drug would be $e^{-0.59} = 0.554$ while the dosage strength is 0 and Bulk is also 0. For mgstr, its coefficent is -0.01, which means a 1 unit increase in dosage strength will lead to a 0.01 decrease in log price per mg while holding all other coefficients constant. That is to say, a 1 unit increase in mgstr will lead to original price increase by a factor of $e^{-0.01} = 0.99$ times. For Bulk, if we switch the category of bulk from 0 to 1 while holding all other coefficients constant, then the intercept of the log price will decrease 0.103, which means the original price per gram will incrase by a factor of $e^{-0.103} = 0.902$ times.
+
+For random effect, as we can see from the graph, there is certain degree random effect in the model although their contribution is small. For states like Tennessee, Virginia, and Oklahama, the price of Morphin would be higher. However, for states like Arizona, California, and Neveda, the price of Morphine would be lower. 
+
+
+```{r, fig.width=3, fig.height=3, warning=FALSE, echo=FALSE}  
+plot(model, type=c("p","smooth"), col.line=1, main = "Residuals vs Fitted")
+lattice::qqmath(model, main = "Normal QQ")
+plot(model,sqrt(abs(resid(.)))~fitted(.), type=c("p","smooth"), col.line=1, main = "Scale-Location")
+plot(model, rstudent(.) ~ hatvalues(.), main = "Residuals")
+```
+
+
+Above plots are the diagonistic plots for the model. In the first plot, all of the points are nearly randomly distributed around the 0 line except there is a small pattern. However, that pattern is acceptable. The QQ plot shows the target variable is deviated fromm the normal distribution. That deviation is expected because the distribution of the $log(price)$ is not that normally distributed as shown in the EDA. For the scale-location plot, there is not an obvious pattern in the graph, which means the variance of the residual is constant across all level of predictions. In the last plot, there are also not any influential outliers exist. Thus our model is good. At this point, we successfully train a mdoel that can predict the Morphine price.
+
+## Limitation
+
+First, when we are exploring the models, we use the forward stepwise selection with the order based on logical reasoning of the relevance between the predictors and the response variable. Since it is forward stepwise selection rather than a method which exhausts all the possible subsets of the predictors, we might miss the optimal combination of the predictors. Second, we did not exhaust all possible interactions, either. In the modeling process, we chose interactions based on logical reasoning and physical significance of such interactions. However, there might be other interactions or variable transformations that can improve the performance of the model but physically meaningless. When we built the model, we also cared about the interpretability of model, so we actively avoid the meaningless interactions like the interaction between the `primary reason` and `source`, whose physical meanings were hard to interpret how it was related to the price of the morphine. We were also worried about the potential overfit when involving more terms in the model, which was another reason that we did not try to exhaust all possible interactions from the data set. 
 
 
 
