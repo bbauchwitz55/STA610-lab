@@ -18,6 +18,9 @@ library(brms)
 library(lattice)
 library(rstan)
 library(sjstats)
+library(sjPlot)
+library(merTools) 
+library(patchwork)
 library(kableExtra)
 
 knitr::opts_chunk$set(echo = F, include = F)
@@ -172,6 +175,140 @@ streetrx.m.comp.pppm <- streetrx.m.comp %>% filter(ppm != 0)
 ```{r rename data}
 data <- streetrx.m.comp.pppm
 ```
+## Exploratory Data Analysis 
+
+In this part, we explore distributions of the variables, potential relationships, and potential interactions that we might include in the model.
+
+**1. Response Variable**
+
+```{r, echo=F, fig.asp=0.4, fig.align='center', fig.cap="Log Transformation on Response"}
+p1 <- ggplot(data) +
+  geom_density(aes(x = ppm)) +
+  theme_bw(base_size=16)
+
+# response transform
+p2 <- ggplot(data) + 
+  geom_density(aes(x = log(ppm))) +
+  theme_bw(base_size = 16)
+
+p1+p2
+```
+
+First, we examine the `ppm` variable (price per milligram), our primary outcome variable. Even though the values don’t vary over many orders of magnitude, it has extreme right skew. Taking the log of these values appears to dramatically improve various indicators of normality while the data still fails a Shapiro-Wilk normality assessment this transform appears reasonable for the data. 
+
+**2. Group Variables** 
+
+##### City 
+
+There are 1654 unique levels of `City_final`, which indicates the unique cities recorded in our data set. To explore whether there is a relationship between the cities and the log price per milligram of morphine, we make a box plot of randomly chosen 25 cities. The log price per milligram of morphine seems to differ by cities.  
+
+```{r, echo = F, fig.asp=0.55, fig.cap="log ppm differs by cities"}
+set.seed(100)
+sample_city <- sample(unique(data$City_final), 25, replace=FALSE)
+ggplot(data[is.element(data$City_final, sample_city),], 
+       aes(x=City_final, y=log(ppm), fill=City_final)) + 
+  geom_boxplot() + 
+  labs(title="log ppm by city", 
+       y="log(ppm)") + theme_classic() + 
+  theme(legend.position="none", 
+        axis.text.x= element_text(angle=90, hjust=1),
+        axis.title.x = element_blank(), 
+        plot.title = element_text(hjust=0.5))
+```
+
+##### State 
+Next, we explore the relationship between log ppm and state. We can observe that the log ppm differs by the states.
+
+```{r, echo = F, fig.cap="log ppm differs by state"}
+avlppm.state<-tapply(log(streetrx.m.comp.pppm$ppm),streetrx.m.comp.pppm$state,mean,na.rm=TRUE) 
+id.state<-names(avlppm.state)
+m<-length(id.state)
+plot(c(1,m),range(log(streetrx.m.comp.pppm$ppm)), type="n",
+ylab="log(ppm)", xlab="rank of state-specific log(ppm) average",cex=.7)
+
+for(state in id.state[order( avlppm.state )[seq(1,length(avlppm.state),by=1)]])
+{
+  y<-log(streetrx.m.comp.pppm$ppm[streetrx.m.comp.pppm$state==state])
+  x<-rank(avlppm.state)[ id.state==state]
+  points( rep(x,length(y)), y,pch=16,cex=.6 ) 
+  points(x, mean(y),col="blue",pch=16,cex=.8) 
+  segments( x,min(y),x,max(y))
+}
+abline(h=mean(avlppm.state))
+```
+
+##### Region 
+
+Finally, we observe that the log ppm also differs by USA regions, but such difference is not quite obvious.
+
+```{r, echo = F, fig.cap="log ppm differs by regions", fig.asp=0.4, }
+ggplot(data, aes(x=USA_region, y=log(ppm), fill=USA_region)) + 
+  geom_boxplot() + 
+  labs(title="log ppm by USA Regions", 
+       y="log(ppm)") + theme_classic() + 
+  theme(legend.position="none", 
+        axis.text.x= element_text(angle=90, hjust=1),
+        axis.title.x = element_blank(), 
+        plot.title = element_text(hjust=0.5))
+```
+However, to determine which one of these grouping variables should be included in the model, we need to perform formal tests and analyses. Preliminarily, we make three models with cities, states, and regions as the only predictors respectively, and perform ANOVA tests. The results show that log ppm differs significantly by states and regions, but not that much by cities.  
+
+```{r, echo = F}
+rm1 <- lmer(log(ppm)~(1|USA_region), data = streetrx.m.comp.pppm)
+rm2 <- lmer(log(ppm)~(1|state), data = streetrx.m.comp.pppm)
+rm3 <- lmer(log(ppm)~(1|City_final), data = streetrx.m.comp.pppm)
+```
+
+```{r, echo = F, fig.asp=0.4, fig.cap="Distribution of State Random Effects"}
+par(mfrow =c(3,1))
+plotREsim(REsim(rm2,n.sims=100),stat='median',sd=TRUE)
+```
+
+We then build three random effects anova models with only cities, states, and regions as predictors respectively. The plots of random effects show that state might be the best to included individually as our grouping variables, it indicates reasonable amount of information to demonstrates the heterogeneity of log ppm across locations.**(See Appendix for random effect plots for cities and regions)** A series of nested tests for including multiply grouping variables will be performed in the Model section.  
+
+**3. Fixed Effect Predictors** 
+
+##### Days 
+
+The first variable we consider is the linear temporal variable we created, which is number of days since Jan 1, 2010. This lets us encode time in a semi-continuous manner. Despite the discrete encoding, the data actually functions quite well as a numeric predictor since there is high resolution relative to the overall time scale. The only apparent thing is that when we plot the price data against over time, the data is clearly sparser earlier in streetrx's history. However, with the appropriate parameter selection, this should not be a significant issue in the overall models we will create.
+
+However, by only looking at the relationship between this variable and the log ppm, we do not observe obvious linear association.**(See Appendix Fig.7)**
+
+We then consider the effects of days in each group, presumably by state. We randomly sample 8 states. In some states, the log ppm seems to change across the days elapsed. Such change may not be very obvious as the data points are sparse. Still, it might be worth trying to add random slopes of days by state to the model.  
+
+```{r, warning=F, message = F, echo = F, fig.asp=0.6, fig.cap="Change in log ppm by time in different states"}
+set.seed(108)
+sample_state <- sample(unique(data$state), 6, replace=FALSE)
+ggplot(data[is.element(data$state, sample_state), ], aes(x=Days_since_010110, y=log(ppm), color=state)) +
+  geom_point() + 
+  geom_smooth(method="lm", fill=NA) +
+  labs(x = "Days since 2010/01/01", y = "log ppm")
+```
+##### Dosage Strength 
+
+Although `mgstr`, the dosage strength, is numeric, values are reported at discrete intervals, perhaps due to standard packaging sizes or users rounding off the values that they reported. All told, there are 16 unique values ranging from 1 to 200. We have two options: treat this as a categorical variable or accept the sparse numeric coding. If we do ultimately evaluate `mgstr` in our model, it does not seem that we would be interested in categorical relationships. In other words, we don't have any reason to believe there is something unique about individual package size levels. Instead, we are concerned with the general trend in how different volumes affect price. Since 16 points is more than adequate to fit a line in most applications and since the data we've collected has multiple volume sizes at each order of magnitude, it seems reasonable to continue with the numeric encoding.
+
+```{r, echo = F, fig.asp=0.4, fig.cap="Slightly negative association between log ppm and dosage strength"}
+plot(log(data$ppm)~data$mgstr, xlab = "dosage strength", ylab = "log ppm")
+```
+
+There is a slightly negative linear relationship between dosage strength and log ppm.
+We would not consider a random slope by dosage strength by state.**(See Appendix Fig.14)**
+
+##### Primary Reason (See Appendix Fig.8 and Fig.9)
+It seems that, in general, log ppm does not differ too much across different primary reasons for purchasing morphine. 
+
+With-in each state, the log ppm differs according to different primary purchase reasons. Therefore, it is possible to include random slopes of primary reasons by state in the model.  
+
+##### Source (See Appendix Fig.10 and Fig.11)
+
+It seems that in general, the log ppm varies according to the values of the sources class, which indicates the source of each transactions recorded in the data set. 
+
+By examining the associations between source class and log ppm in a random sample of states, we can see that such associations vary across states. It might be worth considering random slopes of sources class by states in the model.
+
+##### Bulk (See Appendix Fig.12 and Fig.13)
+
+The indicator for purchasing 10 units at once, Bulk, does not seem to have an obvious relationship with log ppm. We will not include a random slope of bulk by state either as the plot does not show that such association vary by states. 
 
 
 ## Model design
@@ -259,4 +396,115 @@ We have neither information about nor strong belief regarding the random effect 
 ## Potential Limitations  
 
 forward stepwise selection might miss the optimal model.  
+
+
+
+## Appendix
+
+```{r, fig.cap="Random Effects: USA Regions and States", echo = F}
+plotREsim(REsim(rm1,n.sims=100),stat='median',sd=TRUE)
+plotREsim(REsim(rm3,n.sims=100),stat='median',sd=TRUE)
+```
+
+
+```{r, echo = F, fig.asp=0.4, fig.cap="Relationship between log ppm and Days Elasped"}
+plot(log(data$ppm)~data$Days_since_010110, xlab = "Days since 2010/01/01", ylab = "log ppm")
+```
+
+```{r, echo = F, fig.align='center', fig.cap ="Relationship between log ppm and Primary Reasons"}
+ggplot(data, aes(x=Primary_Reason, y=log(ppm), fill=Primary_Reason)) +
+  geom_boxplot() + 
+  labs(title="log ppm by Primary Reason", 
+       y="log(ppm)") + 
+  theme_classic() + 
+  scale_x_discrete(labels=c("0 No Answer", "10 Pain", "11 Come Down", "13 No Report", "3 Deal w/ Withdrawal", "4 Get High", "5 Resell", "6 Other", "7 DK", "8 Private", "9 Self-treat Pain")) + 
+  theme(legend.position="none", 
+        axis.text.x= element_text(angle=90, hjust=1),
+        axis.title.x = element_blank(), 
+        plot.title = element_text(hjust=0.5)) 
+```
+
+
+```{r, echo = F, fig.asp=0.6, fig.align='center', fig.cap="Analysis: random slopes of Primary Reasons by State"}
+set.seed(102)
+sample_state <- sample(unique(data$state), 4, replace=FALSE)
+ggplot(data[is.element(data$state, sample_state), ], aes(x=Primary_Reason, y=log(ppm), fill=Primary_Reason)) +
+  geom_boxplot() + 
+  labs(title="log ppm vs Primary Reason by state", 
+       y="log(ppm)") + theme_classic() + 
+  scale_x_discrete(labels=c("0", "10", "11", "13", "3", "4", "5", "6", "7", "8", "9")) + 
+  theme(legend.position="none",
+        axis.title.x = element_blank(), 
+        plot.title = element_text(hjust=0.5)) + 
+  facet_wrap(~state, ncol=2)
+```
+
+
+```{r, echo = F, fig.asp=0.4, fig.align='center', fig.cap="Relationship between log ppm and Source Class"}
+ggplot(data, aes(x=Source_class, y=log(ppm), fill=Source_class)) +
+  geom_boxplot() + 
+  labs(title="log ppm by Source_class", 
+       y="log(ppm)") + 
+  theme_classic()  + 
+  theme(legend.position="none", 
+        axis.text.x= element_text(angle=90, hjust=1),
+        axis.title.x = element_blank(), 
+        plot.title = element_text(hjust=0.5)) 
+```
+
+```{r, echo = F, fig.align='center',  fig.cap="Analysis: random slopes of Source class by State"}
+set.seed(103)
+sample_state <- sample(unique(data$state), 8, replace=FALSE)
+ggplot(data[is.element(data$state, sample_state), ], aes(x=Source_class, y=log(ppm), fill=Source_class)) +
+  geom_boxplot() + 
+  labs(title="log ppm vs Source by state", 
+       y="log(ppm)") + theme_classic() + 
+  theme(legend.position="none",
+        axis.title.x = element_blank(), 
+        axis.text.x= element_text(angle=90, hjust=1), 
+        plot.title = element_text(hjust=0.5)) + 
+  facet_wrap(~state, ncol=4)
+```
+
+
+```{r, echo = F, fig.asp = 0.4, fig.cap="Relationship between log ppm and Bulk"}
+ggplot(data, aes(x=as.factor(Bulk), y=log(ppm), fill=as.factor(Bulk))) +
+  geom_boxplot() + 
+  labs(title="log ppm by Bulk", 
+       y="log(ppm)") + 
+  theme_classic()  + 
+  theme(legend.position="none", 
+        axis.text.x= element_text(angle=90, hjust=1),
+        axis.title.x = element_blank(), 
+        plot.title = element_text(hjust=0.5)) 
+```
+
+
+```{r, echo = F, fig.asp=0.4, fig.align='center',  fig.cap="Analysis: random slopes of Bulk by State"}
+set.seed(104)
+sample_state <- sample(unique(data$state), 8, replace=FALSE)
+ggplot(data[is.element(data$state, sample_state), ], aes(x=as.factor(Bulk), y=log(ppm), fill=as.factor(Bulk))) +
+  geom_boxplot() + 
+  labs(title="log ppm vs Bulk by state", 
+       y="log(ppm)") + theme_classic() + 
+  theme(legend.position="none",
+        axis.title.x = element_blank(), 
+        axis.text.x= element_text(angle=90, hjust=1), 
+        plot.title = element_text(hjust=0.5)) + 
+  facet_wrap(~state, ncol=4)
+```
+
+```{r, echo = F, fig.asp= 0.4, fig.align='center',  fig.cap="Analysis: random slopes of Dosage Strength by State"}
+set.seed(105)
+sample_state <- sample(unique(data$state), 8, replace=FALSE)
+ggplot(data[is.element(data$state, sample_state), ], aes(x=as.factor(mgstr), y=log(ppm), fill=as.factor(mgstr))) +
+  geom_point() + 
+  labs(title="log ppm vs Dosage Strength by state", 
+       y="log(ppm)") + theme_classic() + 
+  theme(legend.position="none",
+        axis.title.x = element_blank(), 
+        axis.text.x= element_text(angle=90, hjust=1), 
+        plot.title = element_text(hjust=0.5)) + 
+  facet_wrap(~state, ncol=4)
+```
 
