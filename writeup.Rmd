@@ -193,15 +193,17 @@ p2 <- ggplot(data) +
 p1+p2
 ```
 
-First, we examine the `ppm` variable (price per milligram), our primary outcome variable. Even though the values don’t vary over many orders of magnitude, it has extreme right skew. Taking the log of these values appears to dramatically improve various indicators of normality while the data still fails a Shapiro-Wilk normality assessment this transform appears reasonable for the data. 
+First, we examine the `ppm` variable (price per milligram), our primary outcome variable. Even though the values don’t vary over many orders of magnitude, it has extreme right skew. Taking the log of these values appears to dramatically improve various indicators of normality. While the data still fails a Shapiro-Wilk normality assessment this transform appears reasonable for the data, and the skew are kurtosis are both substantially resolved. 
 
-**2. Group Variables** 
+**2. Location Grouping Variables** 
 
-##### City 
+After processing the ‘city’ data there are 1654 unique cities represented. To explore whether there is a relationship between the cities and the log price per milligram of morphine, we make a box plot of randomly chosen 25 cities. The log(price) of morphine seems to differ by cities. Additionally, there is significant heterogeneity in the sample sizes across cities. 954 cities have only a single observation and the vast majority have fewer than 10, but the city with the most observations has over 300. Next, we explore the relationship between log(price) and state. Again, we observe heterogeneity of the state level price means, though variation in the sample sizes is much less severe. Finally, we explore the relationship between log(price) and region. There is some variation across regions, though the magnitude is fairly small (< 10 cents per mg in the untransformed data).
 
-There are 1654 unique levels of `City_final`, which indicates the unique cities recorded in our data set. To explore whether there is a relationship between the cities and the log price per milligram of morphine, we make a box plot of randomly chosen 25 cities. The log price per milligram of morphine seems to differ by cities.  
+However, to determine which one of these grouping variables should be included in the model, we need to perform formal tests and analyses. Preliminarily, we make three models with cities, states, and regions as the only predictors respectively, and perform ANOVA tests. The results show that log ppm differs significantly by states and regions, but not that much by cities. We then build three random effects anova models with only cities, states, and regions as predictors respectively. The plots of random effects show that state might be the best to included individually as our grouping variables, it indicates reasonable amount of information to demonstrates the heterogeneity of log ppm across locations.**(See Appendix for random effect plots for cities and regions)** A series of nested tests for including multiply grouping variables will be performed in the Model section.   
 
 ```{r, echo = F, fig.asp=0.55, fig.cap="log ppm differs by cities"}
+## city_tallies <- data %>% group_by(City_final) %>% tally()
+## hist(city_tallies$n, breaks=100)
 set.seed(100)
 sample_city <- sample(unique(data$City_final), 25, replace=FALSE)
 ggplot(data[is.element(data$City_final, sample_city),], 
@@ -214,10 +216,7 @@ ggplot(data[is.element(data$City_final, sample_city),],
         axis.title.x = element_blank(), 
         plot.title = element_text(hjust=0.5))
 ```
-
-##### State 
-Next, we explore the relationship between log ppm and state. We can observe that the log ppm differs by the states.
-
+ 
 ```{r, echo = F, fig.cap="log ppm differs by state"}
 avlppm.state<-tapply(log(streetrx.m.comp.pppm$ppm),streetrx.m.comp.pppm$state,mean,na.rm=TRUE) 
 id.state<-names(avlppm.state)
@@ -236,10 +235,6 @@ for(state in id.state[order( avlppm.state )[seq(1,length(avlppm.state),by=1)]])
 abline(h=mean(avlppm.state))
 ```
 
-##### Region 
-
-Finally, we observe that the log ppm also differs by USA regions, but such difference is not quite obvious.
-
 ```{r, echo = F, fig.cap="log ppm differs by regions", fig.asp=0.4, }
 ggplot(data, aes(x=USA_region, y=log(ppm), fill=USA_region)) + 
   geom_boxplot() + 
@@ -250,7 +245,6 @@ ggplot(data, aes(x=USA_region, y=log(ppm), fill=USA_region)) +
         axis.title.x = element_blank(), 
         plot.title = element_text(hjust=0.5))
 ```
-However, to determine which one of these grouping variables should be included in the model, we need to perform formal tests and analyses. Preliminarily, we make three models with cities, states, and regions as the only predictors respectively, and perform ANOVA tests. The results show that log ppm differs significantly by states and regions, but not that much by cities.  
 
 ```{r, echo = F}
 rm1 <- lmer(log(ppm)~(1|USA_region), data = streetrx.m.comp.pppm)
@@ -261,19 +255,13 @@ rm3 <- lmer(log(ppm)~(1|City_final), data = streetrx.m.comp.pppm)
 ```{r, echo = F, fig.asp=0.4, fig.cap="Distribution of State Random Effects"}
 par(mfrow =c(3,1))
 plotREsim(REsim(rm2,n.sims=100),stat='median',sd=TRUE)
-```
-
-We then build three random effects anova models with only cities, states, and regions as predictors respectively. The plots of random effects show that state might be the best to included individually as our grouping variables, it indicates reasonable amount of information to demonstrates the heterogeneity of log ppm across locations.**(See Appendix for random effect plots for cities and regions)** A series of nested tests for including multiply grouping variables will be performed in the Model section.  
+```  
 
 **3. Fixed Effect Predictors** 
 
 ##### Days 
 
-The first variable we consider is the linear temporal variable we created, which is number of days since Jan 1, 2010. This lets us encode time in a semi-continuous manner. Despite the discrete encoding, the data actually functions quite well as a numeric predictor since there is high resolution relative to the overall time scale. The only apparent thing is that when we plot the price data against over time, the data is clearly sparser earlier in streetrx's history. However, with the appropriate parameter selection, this should not be a significant issue in the overall models we will create.
-
-However, by only looking at the relationship between this variable and the log ppm, we do not observe obvious linear association.**(See Appendix Fig.7)**
-
-We then consider the effects of days in each group, presumably by state. We randomly sample 8 states. In some states, the log ppm seems to change across the days elapsed. Such change may not be very obvious as the data points are sparse. Still, it might be worth trying to add random slopes of days by state to the model.  
+The first variable we consider is the linear temporal variable we created, which is number of days since Jan 1, 2010. This lets us encode time in a semi-continuous manner. Despite the discrete encoding, the data actually functions quite well as a numeric predictor since there is high resolution relative to the overall time scale. The only apparent thing is that when we plot the price data against over time, the data is clearly sparser earlier in streetrx's history. However, across the entire dataset we do not observe any clear relationship between time and log(price).**(See Appendix Fig.7)** We then consider the effects of days in each group, using state as our initial grouping predictor, by randomly sampling 8 states. In some states, the log ppm does seem to change over time, while in others it does not. Such change may not be very obvious as the data points are sparse. Still, this suggests it might be worth evaluating random slopes for time by state in our model.   
 
 ```{r, warning=F, message = F, echo = F, fig.asp=0.6, fig.cap="Change in log ppm by time in different states"}
 set.seed(108)
@@ -285,29 +273,22 @@ ggplot(data[is.element(data$state, sample_state), ], aes(x=Days_since_010110, y=
 ```
 ##### Dosage Strength 
 
-Although `mgstr`, the dosage strength, is numeric, values are reported at discrete intervals, perhaps due to standard packaging sizes or users rounding off the values that they reported. All told, there are 16 unique values ranging from 1 to 200. We have two options: treat this as a categorical variable or accept the sparse numeric coding. If we do ultimately evaluate `mgstr` in our model, it does not seem that we would be interested in categorical relationships. In other words, we don't have any reason to believe there is something unique about individual package size levels. Instead, we are concerned with the general trend in how different volumes affect price. Since 16 points is more than adequate to fit a line in most applications and since the data we've collected has multiple volume sizes at each order of magnitude, it seems reasonable to continue with the numeric encoding.
+Although `mgstr`, the dosage strength, is numeric, values are reported at discrete intervals, perhaps due to standard packaging sizes or users rounding off the values that they reported. All told, there are 16 unique values ranging from 1 to 200. We have two options: treat this as a categorical variable or accept the sparse numeric coding. If we do ultimately evaluate `mgstr` in our model, it does not seem that we would be interested in categorical relationships. In other words, we don't have any reason to believe there is something unique about individual package size levels. Instead, we are concerned with the general trend in how different volumes affect price. Since 16 points is more than adequate to fit a line in most applications and since the data we've collected has multiple volume sizes at each order of magnitude, it seems reasonable to continue with the numeric encoding. We observe that there is a slightly negative linear relationship between dosage strength and log(price). We would not consider a random slope by dosage strength by state, because such a relationship does not have a clear interpretation and seems likely to be an artifact, if it were observed. 0**(See Appendix Fig.14)**
 
 ```{r, echo = F, fig.asp=0.4, fig.cap="Slightly negative association between log ppm and dosage strength"}
 plot(log(data$ppm)~data$mgstr, xlab = "dosage strength", ylab = "log ppm")
 ```
 
-There is a slightly negative linear relationship between dosage strength and log ppm.
-We would not consider a random slope by dosage strength by state.**(See Appendix Fig.14)**
-
 ##### Primary Reason (See Appendix Fig.8 and Fig.9)
-It seems that, in general, log ppm does not differ too much across different primary reasons for purchasing morphine. 
-
-With-in each state, the log ppm differs according to different primary purchase reasons. Therefore, it is possible to include random slopes of primary reasons by state in the model.  
+It seems that, in general, log(price) does not differ too much across different primary reasons for purchasing morphine. Within each state, the log ppm differs according to different primary purchase reasons. However, variance is significant, so variation may be largely a result of over segmentation of the data.  
 
 ##### Source (See Appendix Fig.10 and Fig.11)
 
-It seems that in general, the log ppm varies according to the values of the sources class, which indicates the source of each transactions recorded in the data set. 
-
-By examining the associations between source class and log ppm in a random sample of states, we can see that such associations vary across states. It might be worth considering random slopes of sources class by states in the model.
+It seems that in general, log(price) varies according to the values of the sources class, which indicates the source of each transactions recorded in the data set. By examining the associations between source class and log ppm in a random sample of states, we can see that such associations vary across states. Again, the within-source variance is quite large, so this effect may likely be the result of over segmentation, though it might be worth considering random slopes of sources class by states in the model.
 
 ##### Bulk (See Appendix Fig.12 and Fig.13)
 
-The indicator for purchasing 10 units at once, Bulk, does not seem to have an obvious relationship with log ppm. We will not include a random slope of bulk by state either as the plot does not show that such association vary by states. 
+The indicator for purchasing 10 units at once, Bulk, does not seem to have an obvious relationship with log ppm. We will not include a random interaction of bulk by state either as the plot does not show that such association vary by states. 
 
 
 ## Model design
@@ -418,6 +399,10 @@ plot(model, rstudent(.) ~ hatvalues(.), main = "Residuals")
 ```
 
 Above plots are the diagnostic plots for the model. In the first plot, all of the points are nearly randomly distributed around the 0 line except there is a small pattern. However, that pattern is acceptable. The QQ plot shows the outcome variable is deviated from the normal distribution. That deviation is expected because the distribution of the $log(price)$ is not perfectly normally distributed as shown in the EDA. However, the skew and kurtosis are not excessive and we don’t find that the deviance from normality is too extreme to render the linear model unacceptable. For the scale-location plot, there is not an obvious pattern in the graph, which means the variance of the residual is constant across all level of predictions. In the last plot, the model is not being excessively influenced by strong outliers. Therefore, we find that our identified model is likely given the data and reasonable given the modeling assumptions.
+
+The overall conclusion is that price per milligram of morphine is primarily predicted by the dosage strength, the state in which the purchase was made, and whether or not it was a bulk purchase. Though the model cannot prove causation, this conclusion is plausible for several reasons. First, the active ingredient of a drug is usually the primary driver of price, so having price be related to dosage strength in a secondary market makes sense. Second, for most goods, bulk purchases reduce cost because it alleviates risk to the supplier, so it is not surprising to see that bulk purchases of morphine also tend to be at lower prices per milligram. Third, different states have different economic, regulatory, and social factors that will influence drug use, so it is not surprising to see that there are slightly different drug markets in different states.
+
+We also interpret why certain factors may be absent from the model. The absence of ‘purchase reason’ and ‘source’ from the model are not that surprising. Purchase reason would not usually be known to the drug seller, so it makes sense that it should not significantly influence price. Similarly, source of information occurs after the transaction is complete and cannot influence the price, only the reporter’s recollection of the price. We do not have a strong hypothesis that prices should be reported more or less accurately from different sources of information. The absence of ‘city’ is likely due to the sample size of the data. Heterogeneity across locations is likely to increase at higher levels of resolution, so with a sufficiently large dataset we may see the largest location heterogeneity at the city level. However, when the vast majority of cities have only one or a few observations, it is not possible to detect these differences in the data. At lower levels of resolution, variation is likely to reduce, so it also makes sense that region is not a significant predictor. The absence of ‘month’ as a predictor suggests that seasonal trends do not strongly predict price. For a drug with major dependence on agricultural precursors, such as heroin or cocaine, we may expect more monthly trends, but for a drug like morphine it is less surprising that monthly trends are weak. The absence of time affecting the price is most surprising. For most goods, we expect that prices will increase over time due to inflation. However, for high-tech goods, we also observe prices decreasing over time as production efficiency increases. The fact that time does not strongly predict price may be explained by these two opposing forces canceling each other out.
 
 ## Limitations
 
